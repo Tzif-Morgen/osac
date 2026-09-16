@@ -76,15 +76,13 @@ def test_compute_instance_api_fields(
     assert vm_strategy == "Always", f"VM runStrategy should be Always, got {vm_strategy}"
     assert vm_status == "Running", f"VM should be Running, got {vm_status}"
 
-    # Immutability: cores
-    output, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"cores":8}}')
-    assert rc != 0, "cores field should be immutable"
-    assert "cores is immutable" in output, f"Expected immutability error, got: {output}"
+    # Mutability: cores
+    _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"cores":8}}')
+    assert rc == 0, "cores update should succeed"
 
-    # Immutability: memoryGiB
-    output, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"memoryGiB":16}}')
-    assert rc != 0, "memoryGiB field should be immutable"
-    assert "memoryGiB is immutable" in output, f"Expected immutability error, got: {output}"
+    # Mutability: memoryGiB
+    _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"memoryGiB":16}}')
+    assert rc == 0, "memoryGiB update should succeed"
 
     # Immutability: image
     output, rc = k8s_hub_client.patch(
