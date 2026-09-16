@@ -16,8 +16,8 @@ columns:
 - header: NAME
   value: this.id
 
-- header: CORES
-  value: this.spec.cores
+- header: VCPUS
+  value: this.spec.vcpus
 
 - header: MEMORY
   value: this.spec.memory_gib

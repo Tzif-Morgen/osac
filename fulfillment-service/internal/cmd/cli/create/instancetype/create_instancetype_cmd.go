@@ -44,10 +44,10 @@ func Cmd() *cobra.Command {
 		nameFlagHelp,
 	)
 	flags.Int32Var(
-		&runner.cores,
-		"cores",
+		&runner.vcpus,
+		"vcpus",
 		0,
-		coresFlagHelp,
+		vcpusFlagHelp,
 	)
 	flags.Int32Var(
 		&runner.memoryGiB,
@@ -86,7 +86,7 @@ func Cmd() *cobra.Command {
 type runnerContext struct {
 	console              *terminal.Console
 	name                 string
-	cores                int32
+	vcpus                int32
 	memoryGiB            int32
 	description          string
 	gpuPCIDeviceSelector string
@@ -111,8 +111,8 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	if c.name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if c.cores <= 0 {
-		return fmt.Errorf("cores must be greater than zero")
+	if c.vcpus <= 0 {
+		return fmt.Errorf("vcpus must be greater than zero")
 	}
 	if c.memoryGiB <= 0 {
 		return fmt.Errorf("memory-gib must be greater than zero")
@@ -133,7 +133,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	// Prepare the instance type:
 	specBuilder := privatev1.InstanceTypeSpec_builder{
-		Cores:       c.cores,
+		Vcpus:       c.vcpus,
 		MemoryGib:   c.memoryGiB,
 		Description: c.description,
 	}
@@ -171,19 +171,19 @@ const shortHelp = `Create an instance type`
 const longHelp = `
 Create an instance type.
 
-An instance type defines a pre-configured compute bundle (CPU cores, memory) that can be referenced
+An instance type defines a pre-configured compute bundle (vCPUs, memory) that can be referenced
 by name when creating compute instances. Instance types are managed by Cloud Provider Admins.
 
 To create an instance type:
 
 {{ bt 3 }}shell
-{{ binary }} create instancetype --name standard-4-16 --cores 4 --memory-gib 16 --description 'Balanced compute'
+{{ binary }} create instancetype --name standard-4-16 --vcpus 4 --memory-gib 16 --description 'Balanced compute'
 {{ bt 3 }}
 
 To create a GPU-enabled instance type, provide all three GPU flags:
 
 {{ bt 3 }}shell
-{{ binary }} create instancetype --name gpu-a100-4-16 --cores 4 --memory-gib 16 \
+{{ binary }} create instancetype --name gpu-a100-4-16 --vcpus 4 --memory-gib 16 \
   --gpu-pci-device-selector '10DE:20B0' --gpu-resource-name 'nvidia.com/A100' --gpu-count 1
 {{ bt 3 }}
 `
@@ -193,8 +193,8 @@ _NAME_ - Name of the instance type. Must be a unique, human-readable identifier
 (e.g., {{ bt }}standard-4-16{{ bt }}).
 `
 
-const coresFlagHelp = `
-_CORES_ - Number of CPU cores for this instance type. Must be greater than zero.
+const vcpusFlagHelp = `
+_VCPUS_ - Number of virtual CPUs for this instance type. Must be greater than zero.
 `
 
 const memoryGibFlagHelp = `

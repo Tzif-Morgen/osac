@@ -34,13 +34,13 @@ var _ = Describe("Create instancetype flag registration", func() {
 		Expect(flag.Usage).To(ContainSubstring("Name"))
 	})
 
-	It("should register --cores flag", func() {
+	It("should register --vcpus flag", func() {
 		cmd := Cmd()
 		cmd.SetOut(GinkgoWriter)
 		cmd.SetErr(GinkgoWriter)
-		flag := cmd.Flags().Lookup("cores")
+		flag := cmd.Flags().Lookup("vcpus")
 		Expect(flag).NotTo(BeNil())
-		Expect(flag.Usage).To(ContainSubstring("cores"))
+		Expect(flag.Usage).To(ContainSubstring("virtual CPUs"))
 	})
 
 	It("should register --memory-gib flag", func() {

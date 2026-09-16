@@ -38,7 +38,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "standard-4-16",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:       4,
+				Vcpus:       4,
 				MemoryGib:   16,
 				Description: "Balanced compute",
 				State:       publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
@@ -63,7 +63,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "deprecated-2-8",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     2,
+				Vcpus:     2,
 				MemoryGib: 8,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED,
 			}.Build(),
@@ -82,7 +82,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "old-4-16",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     4,
+				Vcpus:     4,
 				MemoryGib: 16,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED,
 				Deprecation: publicv1.InstanceTypeDeprecation_builder{
@@ -105,7 +105,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "active-8-32",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     8,
+				Vcpus:     8,
 				MemoryGib: 32,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 			}.Build(),
@@ -123,7 +123,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "no-desc-2-4",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     2,
+				Vcpus:     2,
 				MemoryGib: 4,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 			}.Build(),
@@ -139,7 +139,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "highmem-4-64",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:       4,
+				Vcpus:       4,
 				MemoryGib:   64,
 				Description: "High memory",
 				State:       publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
@@ -156,7 +156,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "gpu-a100-4-16",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     4,
+				Vcpus:     4,
 				MemoryGib: 16,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 				Gpu: publicv1.GpuSpec_builder{
@@ -179,7 +179,7 @@ var _ = Describe("Rendering tests", func() {
 				Name: "standard-4-16",
 			}.Build(),
 			Spec: publicv1.InstanceTypeSpec_builder{
-				Cores:     4,
+				Vcpus:     4,
 				MemoryGib: 16,
 				State:     publicv1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 			}.Build(),

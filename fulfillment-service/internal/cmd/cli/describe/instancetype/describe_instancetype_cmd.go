@@ -102,7 +102,7 @@ func renderInstanceType(w io.Writer, it *publicv1.InstanceType) {
 
 	spec := it.GetSpec()
 	if spec != nil {
-		fmt.Fprintf(writer, "Cores:\t%d\n", spec.GetCores())
+		fmt.Fprintf(writer, "VCPUs:\t%d\n", spec.GetVcpus())
 		fmt.Fprintf(writer, "Memory (GiB):\t%d\n", spec.GetMemoryGib())
 
 		if gpu := spec.GetGpu(); gpu != nil {
@@ -151,7 +151,7 @@ const shortHelp = `Describe an instance type`
 const longHelp = `
 Describe an instance type.
 
-Displays detailed information about an instance type, including its compute configuration (cores,
+Displays detailed information about an instance type, including its compute configuration (vCPUs,
 memory), lifecycle state, and deprecation details if applicable.
 
 To describe an instance type by name:
