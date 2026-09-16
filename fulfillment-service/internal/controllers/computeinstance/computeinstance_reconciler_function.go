@@ -710,7 +710,7 @@ func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.Compute
 		return fmt.Errorf("failed to resolve instance type '%s': %w", instanceTypeKey, err)
 	}
 	itSpec := response.GetObject().GetSpec()
-	spec.Cores = itSpec.GetCores()
+	spec.VCPUs = itSpec.GetVcpus()
 	spec.MemoryGiB = itSpec.GetMemoryGib()
 	if gpu := itSpec.GetGpu(); gpu != nil {
 		spec.Gpu = &osacv1alpha1.GpuSpec{

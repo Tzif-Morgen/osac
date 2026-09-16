@@ -148,7 +148,7 @@ var _ = Describe("Compute instances server", func() {
 						Tenant: testTenant,
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 16,
 						State:     privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 					}.Build(),

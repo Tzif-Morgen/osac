@@ -114,7 +114,7 @@ var _ = Describe("ComputeInstance with Subnet attachment", func() {
 					Name: instanceTypeId,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:     2,
+					Vcpus:     2,
 					MemoryGib: 4,
 				}.Build(),
 			}.Build(),

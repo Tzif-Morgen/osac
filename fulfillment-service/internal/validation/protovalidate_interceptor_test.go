@@ -857,7 +857,7 @@ var _ = Describe("Protovalidate interceptor", func() {
 						Name: "my-type",
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     0,
+						Vcpus:     0,
 						MemoryGib: 16,
 					}.Build(),
 				}.Build(),
@@ -890,7 +890,7 @@ var _ = Describe("Protovalidate interceptor", func() {
 						Name: "my-type",
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 0,
 					}.Build(),
 				}.Build(),
@@ -923,7 +923,7 @@ var _ = Describe("Protovalidate interceptor", func() {
 						Name: "my-type",
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 16,
 					}.Build(),
 				}.Build(),

@@ -51,7 +51,7 @@ var _ = Describe("Public instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       cores,
+					Vcpus:       cores,
 					MemoryGib:   memoryGib,
 					Description: "Public IT test type.",
 				}.Build(),
@@ -86,7 +86,7 @@ var _ = Describe("Public instance types", func() {
 		object := response.GetObject()
 		Expect(object).ToNot(BeNil())
 		Expect(object.GetId()).To(Equal(id))
-		Expect(object.GetSpec().GetCores()).To(Equal(int32(4)))
+		Expect(object.GetSpec().GetVcpus()).To(Equal(int32(4)))
 		Expect(object.GetSpec().GetMemoryGib()).To(Equal(int32(16)))
 	})
 

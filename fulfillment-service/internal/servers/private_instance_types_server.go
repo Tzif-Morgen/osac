@@ -274,10 +274,10 @@ func applyInstanceTypeUpdate(base, update *privatev1.InstanceType, mask *fieldma
 
 // validateInstanceTypeImmutability checks that immutable fields have not been changed.
 func validateInstanceTypeImmutability(merged, existing *privatev1.InstanceType) error {
-	if merged.GetSpec().GetCores() != existing.GetSpec().GetCores() {
+	if merged.GetSpec().GetVcpus() != existing.GetSpec().GetVcpus() {
 		return grpcstatus.Errorf(grpccodes.InvalidArgument,
-			"field 'spec.cores' is immutable and cannot be changed from '%d' to '%d'",
-			existing.GetSpec().GetCores(), merged.GetSpec().GetCores())
+			"field 'spec.vcpus' is immutable and cannot be changed from '%d' to '%d'",
+			existing.GetSpec().GetVcpus(), merged.GetSpec().GetVcpus())
 	}
 	if merged.GetSpec().GetMemoryGib() != existing.GetSpec().GetMemoryGib() {
 		return grpcstatus.Errorf(grpccodes.InvalidArgument,

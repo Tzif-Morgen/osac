@@ -156,7 +156,7 @@ var _ = Describe("buildSpec", func() {
 					Object: privatev1.InstanceType_builder{
 						Id: "standard-4-8",
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:     4,
+							Vcpus:     4,
 							MemoryGib: 8,
 						}.Build(),
 					}.Build(),
@@ -217,7 +217,7 @@ var _ = Describe("buildSpec", func() {
 			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(spec.Cores).To(Equal(int32(4)))
+			Expect(spec.VCPUs).To(Equal(int32(4)))
 			Expect(spec.MemoryGiB).To(Equal(int32(8)))
 			Expect(spec.RunStrategy).To(Equal(osacv1alpha1.RunStrategyType("Always")))
 			Expect(spec.SSHKey).To(Equal("ssh-rsa AAAA..."))
@@ -268,7 +268,7 @@ var _ = Describe("buildSpec", func() {
 				Return(privatev1.InstanceTypesGetResponse_builder{
 					Object: privatev1.InstanceType_builder{
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:     4,
+							Vcpus:     4,
 							MemoryGib: 8,
 						}.Build(),
 					}.Build(),
@@ -435,7 +435,7 @@ var _ = Describe("buildSpec", func() {
 			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(spec.Cores).To(BeZero())
+			Expect(spec.VCPUs).To(BeZero())
 			Expect(spec.MemoryGiB).To(BeZero())
 			Expect(spec.RunStrategy).To(BeEmpty())
 			Expect(spec.SSHKey).To(BeEmpty())
@@ -1894,7 +1894,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 			Build()
 	})
 
-	It("resolves instance_type to cores/memory_gib on CR spec", func() {
+	It("resolves instance_type to vcpus/memory_gib on CR spec", func() {
 		mockInstanceTypesClient := NewMockInstanceTypesClient(ctrl)
 		mockInstanceTypesClient.EXPECT().
 			Get(gomock.Any(), gomock.Any()).
@@ -1902,7 +1902,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 				Object: privatev1.InstanceType_builder{
 					Id: "test-type",
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 8,
 					}.Build(),
 				}.Build(),
@@ -1929,7 +1929,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 
 		spec, err := t.buildSpec(ctx)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(spec.Cores).To(Equal(int32(4)))
+		Expect(spec.VCPUs).To(Equal(int32(4)))
 		Expect(spec.MemoryGiB).To(Equal(int32(8)))
 	})
 
@@ -1941,7 +1941,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 				Object: privatev1.InstanceType_builder{
 					Id: "gpu-a100-8core",
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     8,
+						Vcpus:     8,
 						MemoryGib: 64,
 						Gpu: privatev1.GpuSpec_builder{
 							PciDeviceSelector: "10DE:20B0",
@@ -1973,7 +1973,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 
 		spec, err := t.buildSpec(ctx)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(spec.Cores).To(Equal(int32(8)))
+		Expect(spec.VCPUs).To(Equal(int32(8)))
 		Expect(spec.MemoryGiB).To(Equal(int32(64)))
 		Expect(spec.Gpu).ToNot(BeNil())
 		Expect(spec.Gpu.PciDeviceSelector).To(Equal("10DE:20B0"))
@@ -1989,7 +1989,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 				Object: privatev1.InstanceType_builder{
 					Id: "standard-4-8",
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 8,
 					}.Build(),
 				}.Build(),
@@ -2016,7 +2016,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 
 		spec, err := t.buildSpec(ctx)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(spec.Cores).To(Equal(int32(4)))
+		Expect(spec.VCPUs).To(Equal(int32(4)))
 		Expect(spec.MemoryGiB).To(Equal(int32(8)))
 		Expect(spec.Gpu).To(BeNil())
 	})
@@ -2029,7 +2029,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 				Object: privatev1.InstanceType_builder{
 					Id: "gpu-a100-8core",
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     8,
+						Vcpus:     8,
 						MemoryGib: 64,
 						Gpu: privatev1.GpuSpec_builder{
 							PciDeviceSelector: "10DE:20B0",
@@ -2102,7 +2102,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 				Object: privatev1.InstanceType_builder{
 					Id: "test-type",
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 8,
 					}.Build(),
 				}.Build(),
@@ -2299,7 +2299,7 @@ var _ = Describe("Kubernetes validation error handling", func() {
 			Return(privatev1.InstanceTypesGetResponse_builder{
 				Object: privatev1.InstanceType_builder{
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     150,
+						Vcpus:     150,
 						MemoryGib: 2,
 					}.Build(),
 				}.Build(),
@@ -2313,9 +2313,9 @@ var _ = Describe("Kubernetes validation error handling", func() {
 						"vm-test",
 						field.ErrorList{
 							field.Invalid(
-								field.NewPath("spec", "cores"),
+								field.NewPath("spec", "vcpus"),
 								150,
-								"spec.cores in body should be less than or equal to 128",
+								"spec.vcpus in body should be less than or equal to 128",
 							),
 						},
 					)
@@ -2343,7 +2343,7 @@ var _ = Describe("Kubernetes validation error handling", func() {
 		Expect(configCondition).ToNot(BeNil())
 		Expect(configCondition.GetStatus()).To(Equal(privatev1.ConditionStatus_CONDITION_STATUS_FALSE))
 		Expect(configCondition.GetReason()).To(Equal("ValidationFailed"))
-		Expect(configCondition.GetMessage()).To(ContainSubstring("spec.cores"))
+		Expect(configCondition.GetMessage()).To(ContainSubstring("spec.vcpus"))
 		Expect(configCondition.GetMessage()).To(ContainSubstring("128"))
 	})
 
@@ -2353,7 +2353,7 @@ var _ = Describe("Kubernetes validation error handling", func() {
 			Return(privatev1.InstanceTypesGetResponse_builder{
 				Object: privatev1.InstanceType_builder{
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     200,
+						Vcpus:     200,
 						MemoryGib: 2,
 					}.Build(),
 				}.Build(),
@@ -2377,9 +2377,9 @@ var _ = Describe("Kubernetes validation error handling", func() {
 						"vm-existing",
 						field.ErrorList{
 							field.Invalid(
-								field.NewPath("spec", "cores"),
+								field.NewPath("spec", "vcpus"),
 								200,
-								"spec.cores in body should be less than or equal to 128",
+								"spec.vcpus in body should be less than or equal to 128",
 							),
 						},
 					)
@@ -2431,7 +2431,7 @@ var _ = Describe("Kubernetes validation error handling", func() {
 			Return(privatev1.InstanceTypesGetResponse_builder{
 				Object: privatev1.InstanceType_builder{
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 2,
 					}.Build(),
 				}.Build(),
@@ -2447,9 +2447,9 @@ var _ = Describe("Kubernetes validation error handling", func() {
 						"vm-test",
 						field.ErrorList{
 							field.Invalid(
-								field.NewPath("spec", "cores"),
+								field.NewPath("spec", "vcpus"),
 								150,
-								"spec.cores in body should be less than or equal to 128",
+								"spec.vcpus in body should be less than or equal to 128",
 							),
 						},
 					)

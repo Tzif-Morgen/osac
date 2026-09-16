@@ -431,7 +431,7 @@ var _ = Describe("Private compute instance templates server", func() {
 							Name: name,
 						}.Build(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:       4,
+							Vcpus:       4,
 							MemoryGib:   16,
 							Description: "Test instance type.",
 						}.Build(),

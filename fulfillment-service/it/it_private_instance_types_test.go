@@ -48,7 +48,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Integration test type.",
 				}.Build(),
@@ -64,7 +64,7 @@ var _ = Describe("Private instance types", func() {
 		object := response.GetObject()
 		Expect(object).ToNot(BeNil())
 		Expect(object.GetId()).To(Equal(name))
-		Expect(object.GetSpec().GetCores()).To(Equal(int32(4)))
+		Expect(object.GetSpec().GetVcpus()).To(Equal(int32(4)))
 		Expect(object.GetSpec().GetMemoryGib()).To(Equal(int32(16)))
 		Expect(object.GetSpec().GetState()).To(Equal(
 			privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE))
@@ -84,7 +84,7 @@ var _ = Describe("Private instance types", func() {
 						Name: name,
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:       2,
+						Vcpus:       2,
 						MemoryGib:   8,
 						Description: fmt.Sprintf("List test type %d.", i),
 					}.Build(),
@@ -114,7 +114,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       8,
+					Vcpus:       8,
 					MemoryGib:   32,
 					Description: "Get test type.",
 				}.Build(),
@@ -136,7 +136,7 @@ var _ = Describe("Private instance types", func() {
 		object := getResponse.GetObject()
 		Expect(object).ToNot(BeNil())
 		Expect(object.GetId()).To(Equal(name))
-		Expect(object.GetSpec().GetCores()).To(Equal(createResponse.GetObject().GetSpec().GetCores()))
+		Expect(object.GetSpec().GetVcpus()).To(Equal(createResponse.GetObject().GetSpec().GetVcpus()))
 		Expect(object.GetSpec().GetMemoryGib()).To(Equal(createResponse.GetObject().GetSpec().GetMemoryGib()))
 		Expect(object.GetSpec().GetDescription()).To(Equal("Get test type."))
 	})
@@ -149,7 +149,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Original description.",
 				}.Build(),
@@ -196,7 +196,7 @@ var _ = Describe("Private instance types", func() {
 					Finalizers: []string{"a"},
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       2,
+					Vcpus:       2,
 					MemoryGib:   4,
 					Description: "Delete test type.",
 				}.Build(),
@@ -239,7 +239,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Deprecation test type.",
 				}.Build(),
@@ -289,7 +289,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Obsolescence test type.",
 				}.Build(),
@@ -354,7 +354,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Reactivation test type.",
 				}.Build(),
@@ -420,7 +420,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Immutability test type.",
 				}.Build(),
@@ -441,7 +441,7 @@ var _ = Describe("Private instance types", func() {
 				}.Build(),
 				Id: name,
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores: 8,
+					Vcpus: 8,
 				}.Build(),
 			}.Build(),
 		}.Build())
@@ -461,7 +461,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Immutability test type.",
 				}.Build(),
@@ -503,7 +503,7 @@ var _ = Describe("Private instance types", func() {
 						Name: fmt.Sprintf("it-val-%s", uuid.New()),
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:     4,
+						Vcpus:     4,
 						MemoryGib: 16,
 						Gpu:       gpu,
 					}.Build(),
@@ -540,7 +540,7 @@ var _ = Describe("Private instance types", func() {
 					Name: name,
 				}.Build(),
 				Spec: privatev1.InstanceTypeSpec_builder{
-					Cores:       4,
+					Vcpus:       4,
 					MemoryGib:   16,
 					Description: "Deletion protection test type.",
 				}.Build(),
@@ -574,7 +574,7 @@ var _ = Describe("Private instance types", func() {
 						Name: names[i],
 					}.Build(),
 					Spec: privatev1.InstanceTypeSpec_builder{
-						Cores:       2,
+						Vcpus:       2,
 						MemoryGib:   4,
 						Description: fmt.Sprintf("Filter test type %d.", i),
 					}.Build(),
