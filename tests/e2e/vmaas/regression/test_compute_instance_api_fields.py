@@ -79,10 +79,15 @@ def test_compute_instance_api_fields(
     # Mutability: cores
     _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"cores":8}}')
     assert rc == 0, "cores update should succeed"
+    assert k8s_hub_client.get_jsonpath(resource="computeinstance", name=instance_name, jsonpath="{.spec.cores}") == "8"
 
     # Mutability: memoryGiB
     _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"memoryGiB":16}}')
     assert rc == 0, "memoryGiB update should succeed"
+    assert (
+        k8s_hub_client.get_jsonpath(resource="computeinstance", name=instance_name, jsonpath="{.spec.memoryGiB}")
+        == "16"
+    )
 
     # Immutability: image
     output, rc = k8s_hub_client.patch(
