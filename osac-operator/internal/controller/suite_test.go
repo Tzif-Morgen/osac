@@ -169,7 +169,7 @@ func newTestComputeInstanceSpec(templateID string) osacv1alpha1.ComputeInstanceS
 			SourceType: osacv1alpha1.ImageSourceTypeRegistry,
 			SourceRef:  "quay.io/fedora/fedora-coreos:stable",
 		},
-		Cores:     4,
+		VCPUs:     4,
 		MemoryGiB: 8,
 		BootDisk: osacv1alpha1.DiskSpec{
 			SizeGiB:     30,

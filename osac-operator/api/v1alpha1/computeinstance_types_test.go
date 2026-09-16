@@ -25,7 +25,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "quay.io/fedora/fedora-coreos:stable",
 				},
-				Cores:     4,
+				VCPUs:     4,
 				MemoryGiB: 8,
 				BootDisk: v1alpha1.DiskSpec{
 					SizeGiB:     30,
@@ -37,7 +37,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 			Expect(spec.TemplateID).To(Equal("rhel10-desktop"))
 			Expect(spec.Image.SourceType).To(Equal(v1alpha1.ImageSourceTypeRegistry))
 			Expect(spec.Image.SourceRef).To(Equal("quay.io/fedora/fedora-coreos:stable"))
-			Expect(spec.Cores).To(Equal(int32(4)))
+			Expect(spec.VCPUs).To(Equal(int32(4)))
 			Expect(spec.MemoryGiB).To(Equal(int32(8)))
 			Expect(spec.BootDisk.SizeGiB).To(Equal(int32(30)))
 			Expect(spec.RunStrategy).To(Equal(v1alpha1.RunStrategyAlways))
@@ -50,14 +50,14 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       1,
+				VCPUs:       1,
 				MemoryGiB:   1,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 1, StorageTier: "standard"},
 				RunStrategy: v1alpha1.RunStrategyAlways,
 			}
 
 			Expect(spec.TemplateID).ToNot(BeEmpty())
-			Expect(spec.Cores).To(BeNumerically(">=", 1))
+			Expect(spec.VCPUs).To(BeNumerically(">=", 1))
 			Expect(spec.MemoryGiB).To(BeNumerically(">=", 1))
 			Expect(spec.BootDisk.SizeGiB).To(BeNumerically(">=", 1))
 		})
@@ -69,7 +69,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:     2,
+				VCPUs:     2,
 				MemoryGiB: 4,
 				BootDisk:  v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				AdditionalDisks: []v1alpha1.DiskSpec{
@@ -93,7 +93,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:     2,
+				VCPUs:     2,
 				MemoryGiB: 4,
 				BootDisk:  v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				UserDataSecretRef: &corev1.LocalObjectReference{
@@ -113,7 +113,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:     8,
+				VCPUs:     8,
 				MemoryGiB: 64,
 				BootDisk:  v1alpha1.DiskSpec{SizeGiB: 100, StorageTier: "standard"},
 				Gpu: &v1alpha1.GpuSpec{
@@ -138,7 +138,7 @@ var _ = Describe("ComputeInstanceSpec", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       2,
+				VCPUs:       2,
 				MemoryGiB:   4,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				SSHKey:      sshKey,
@@ -206,7 +206,7 @@ var _ = Describe("ComputeInstance", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       2,
+				VCPUs:       2,
 				MemoryGiB:   4,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				RunStrategy: v1alpha1.RunStrategyAlways,
@@ -230,7 +230,7 @@ var _ = Describe("ComputeInstance", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       2,
+				VCPUs:       2,
 				MemoryGiB:   4,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				RunStrategy: v1alpha1.RunStrategyAlways,
@@ -254,7 +254,7 @@ var _ = Describe("ComputeInstance", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       2,
+				VCPUs:       2,
 				MemoryGiB:   4,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				RunStrategy: v1alpha1.RunStrategyAlways,
@@ -278,7 +278,7 @@ var _ = Describe("ComputeInstance", func() {
 					SourceType: v1alpha1.ImageSourceTypeRegistry,
 					SourceRef:  "test-image:latest",
 				},
-				Cores:       2,
+				VCPUs:       2,
 				MemoryGiB:   4,
 				BootDisk:    v1alpha1.DiskSpec{SizeGiB: 10, StorageTier: "standard"},
 				RunStrategy: v1alpha1.RunStrategyAlways,

@@ -20,8 +20,8 @@ spec:
     - jsonPath: .spec.templateID
       name: Template
       type: string
-    - jsonPath: .spec.cores
-      name: Cores
+    - jsonPath: .spec.vcpus
+      name: VCPUs
       type: integer
     - jsonPath: .spec.memoryGiB
       name: Memory
@@ -114,12 +114,6 @@ spec:
                 x-kubernetes-validations:
                 - message: bootDisk is immutable
                   rule: self == oldSelf
-              cores:
-                description: Cores is the number of CPU cores
-                format: int32
-                maximum: 128
-                minimum: 1
-                type: integer
               gpu:
                 description: Gpu defines GPU passthrough configuration resolved from
                   the InstanceType.
@@ -294,13 +288,19 @@ spec:
                 x-kubernetes-validations:
                 - message: userDataSecretRef is immutable
                   rule: self == oldSelf
+              vcpus:
+                description: VCPUs is the number of virtual CPUs
+                format: int32
+                maximum: 128
+                minimum: 1
+                type: integer
             required:
             - bootDisk
-            - cores
             - image
             - memoryGiB
             - runStrategy
             - templateID
+            - vcpus
             type: object
             x-kubernetes-validations:
             - message: gpu is immutable

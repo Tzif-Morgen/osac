@@ -135,11 +135,11 @@ type ComputeInstanceSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="guestOSFamily is immutable"
 	GuestOSFamily string `json:"guestOSFamily,omitempty"`
 
-	// Cores is the number of CPU cores
+	// VCPUs is the number of virtual CPUs
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
-	Cores int32 `json:"cores"`
+	VCPUs int32 `json:"vcpus"`
 
 	// MemoryGiB is the memory in gibibytes
 	// +kubebuilder:validation:Required
@@ -340,7 +340,7 @@ type ComputeInstanceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ci
 // +kubebuilder:printcolumn:name="Template",type=string,JSONPath=`.spec.templateID`
-// +kubebuilder:printcolumn:name="Cores",type=integer,JSONPath=`.spec.cores`
+// +kubebuilder:printcolumn:name="VCPUs",type=integer,JSONPath=`.spec.vcpus`
 // +kubebuilder:printcolumn:name="Memory",type=integer,JSONPath=`.spec.memoryGiB`
 // +kubebuilder:printcolumn:name="OS",type=string,JSONPath=`.spec.guestOSFamily`
 // +kubebuilder:printcolumn:name="RunStrategy",type=string,JSONPath=`.spec.runStrategy`
