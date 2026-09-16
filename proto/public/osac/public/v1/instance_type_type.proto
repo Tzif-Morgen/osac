@@ -92,12 +92,12 @@ message GpuSpec {
 
 // Defines the desired configuration for an InstanceType.
 //
-// The spec contains admin-specified parameters that define the compute bundle. The `cores` and `memory_gib`
+// The spec contains admin-specified parameters that define the compute bundle. The `vcpus` and `memory_gib`
 // fields are immutable after creation. The `description`, `state`, and `deprecation` fields may be updated
 // to manage the instance type lifecycle.
 message InstanceTypeSpec {
-  // Number of CPU cores. Immutable after creation.
-  int32 cores = 1 [(buf.validate.field).int32.gt = 0];
+  // Number of virtual CPUs. Immutable after creation.
+  int32 vcpus = 1 [(buf.validate.field).int32.gt = 0];
 
   // Amount of memory in GiB. Immutable after creation.
   int32 memory_gib = 2 [(buf.validate.field).int32.gt = 0];
