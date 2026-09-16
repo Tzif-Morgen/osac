@@ -370,6 +370,22 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 			Expect(instance.Spec.Cores).To(Equal(int32(4)))
 		})
 
+		It("should reject updating cores outside the allowed range", func() {
+			instance := createValidInstance("test-cores-bounds")
+			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+			instance.Spec.Cores = 0
+			err := k8sClient.Update(ctx, instance)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
+
+			instance.Spec.Cores = 129
+			err = k8sClient.Update(ctx, instance)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
+		})
+
 		It("should allow changing memoryGiB", func() {
 			instance := createValidInstance("test-memory-mutable")
 			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
@@ -384,6 +400,17 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 			// Verify the change persisted
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
 			Expect(instance.Spec.MemoryGiB).To(Equal(int32(8)))
+		})
+
+		It("should reject updating memoryGiB below the minimum", func() {
+			instance := createValidInstance("test-memory-below-minimum")
+			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+			instance.Spec.MemoryGiB = 0
+			err := k8sClient.Update(ctx, instance)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
 		})
 
 		It("should allow changing runStrategy", func() {
