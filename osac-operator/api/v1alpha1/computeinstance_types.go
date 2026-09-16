@@ -139,13 +139,11 @@ type ComputeInstanceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="cores is immutable"
 	Cores int32 `json:"cores"`
 
 	// MemoryGiB is the memory in gibibytes
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="memoryGiB is immutable"
 	MemoryGiB int32 `json:"memoryGiB"`
 
 	// BootDisk is the primary boot disk

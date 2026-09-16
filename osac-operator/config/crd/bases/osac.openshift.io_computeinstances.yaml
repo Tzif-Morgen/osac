@@ -120,9 +120,6 @@ spec:
                 maximum: 128
                 minimum: 1
                 type: integer
-                x-kubernetes-validations:
-                - message: cores is immutable
-                  rule: self == oldSelf
               gpu:
                 description: Gpu defines GPU passthrough configuration resolved from
                   the InstanceType.
@@ -185,9 +182,6 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
-                x-kubernetes-validations:
-                - message: memoryGiB is immutable
-                  rule: self == oldSelf
               networkAttachments:
                 description: |-
                   NetworkAttachments defines multiple NICs when more than one subnet (and optional security groups per NIC) is required.

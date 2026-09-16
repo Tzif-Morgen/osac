@@ -236,38 +236,6 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 		})
 	})
 
-	Describe("Compute resource immutability", func() {
-		It("should reject changing cores", func() {
-			instance := createValidInstance("test-cores-immutable")
-			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
-
-			// Fetch latest version
-			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
-
-			// Try to change cores
-			instance.Spec.Cores = 4
-			err := k8sClient.Update(ctx, instance)
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsInvalid(err)).To(BeTrue())
-			Expect(err.Error()).To(ContainSubstring("cores is immutable"))
-		})
-
-		It("should reject changing memoryGiB", func() {
-			instance := createValidInstance("test-memory-immutable")
-			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
-
-			// Fetch latest version
-			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
-
-			// Try to change memory
-			instance.Spec.MemoryGiB = 8
-			err := k8sClient.Update(ctx, instance)
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsInvalid(err)).To(BeTrue())
-			Expect(err.Error()).To(ContainSubstring("memoryGiB is immutable"))
-		})
-	})
-
 	Describe("Disk immutability", func() {
 		It("should reject changing bootDisk size", func() {
 			instance := createValidInstance("test-bootdisk-immutable")
@@ -386,6 +354,38 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 	})
 
 	Describe("Mutable fields", func() {
+		It("should allow changing cores", func() {
+			instance := createValidInstance("test-cores-mutable")
+			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+
+			// Fetch latest version
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+
+			// Change cores - should succeed
+			instance.Spec.Cores = 4
+			Expect(k8sClient.Update(ctx, instance)).To(Succeed())
+
+			// Verify the change persisted
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+			Expect(instance.Spec.Cores).To(Equal(int32(4)))
+		})
+
+		It("should allow changing memoryGiB", func() {
+			instance := createValidInstance("test-memory-mutable")
+			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+
+			// Fetch latest version
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+
+			// Change memory - should succeed
+			instance.Spec.MemoryGiB = 8
+			Expect(k8sClient.Update(ctx, instance)).To(Succeed())
+
+			// Verify the change persisted
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
+			Expect(instance.Spec.MemoryGiB).To(Equal(int32(8)))
+		})
+
 		It("should allow changing runStrategy", func() {
 			instance := createValidInstance("test-runstrategy-mutable")
 			instance.Spec.RunStrategy = osacv1alpha1.RunStrategyAlways
