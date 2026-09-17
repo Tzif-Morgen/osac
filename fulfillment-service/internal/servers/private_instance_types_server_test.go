@@ -857,7 +857,7 @@ var _ = Describe("Private instance types server", func() {
 							Labels: map[string]string{"env": "prod", "team": "infra"},
 						}.Build(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:       4,
+							Vcpus:       4,
 							MemoryGib:   8,
 							Description: "original",
 						}.Build(),
@@ -872,7 +872,7 @@ var _ = Describe("Private instance types server", func() {
 					Object: privatev1.InstanceType_builder{
 						Id: createResponse.GetObject().GetId(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:       4, // same immutables
+							Vcpus:       4, // same immutables
 							MemoryGib:   8,
 							Description: "updated",
 						}.Build(),
@@ -907,7 +907,7 @@ var _ = Describe("Private instance types server", func() {
 							Finalizers:  []string{"test-finalizer-1", "test-finalizer-2"},
 						}.Build(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:       2,
+							Vcpus:       2,
 							MemoryGib:   4,
 							Description: "original",
 						}.Build(),
@@ -929,7 +929,7 @@ var _ = Describe("Private instance types server", func() {
 							// Project:     OMITTED
 						}.Build(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:       2,
+							Vcpus:       2,
 							MemoryGib:   4,
 							Description: "updated",
 						}.Build(),
