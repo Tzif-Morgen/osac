@@ -116,7 +116,7 @@ type ComputeInstanceSpec struct {
 	TemplateID string `json:"templateID"`
 
 	// TemplateParameters allows passing additional template-specific parameters as JSON-encoded key-value pairs.
-	// This complements the explicit fields (cores, memoryGiB, etc.) and is used for:
+	// This complements the explicit fields (vcpus, memoryGiB, etc.) and is used for:
 	// - Template-specific parameters not covered by explicit fields (e.g., exposed_ports)
 	// - Custom parameters defined by specific templates
 	// +kubebuilder:validation:Optional

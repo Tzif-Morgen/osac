@@ -556,7 +556,7 @@ func (s *PrivateComputeInstancesServer) applyComputeTemplate(
 
 // validateInstanceType checks the instance type selected by the caller, Catalog policy, or
 // Template and fills its stored ID/name/scope. The VM keeps the reference; the controller
-// reads cores and memory from the type later.
+// reads vCPUs and memory from the type later.
 func (s *PrivateComputeInstancesServer) validateInstanceType(
 	ctx context.Context,
 	ci *privatev1.ComputeInstance,

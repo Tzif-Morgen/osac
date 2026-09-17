@@ -412,8 +412,8 @@ var _ = Describe("Private instance types", func() {
 
 	// Error scenarios (D-04)
 
-	It("Rejects update of immutable field cores", func() {
-		name := fmt.Sprintf("it-immut-cores-%s", uuid.New())
+	It("Rejects update of immutable field vcpus", func() {
+		name := fmt.Sprintf("it-immut-vcpus-%s", uuid.New())
 		_, err := client.Create(ctx, privatev1.InstanceTypesCreateRequest_builder{
 			Object: privatev1.InstanceType_builder{
 				Metadata: privatev1.Metadata_builder{
@@ -433,7 +433,7 @@ var _ = Describe("Private instance types", func() {
 			}.Build())
 		})
 
-		// Attempt to change cores:
+		// Attempt to change vcpus:
 		_, err = client.Update(ctx, privatev1.InstanceTypesUpdateRequest_builder{
 			Object: privatev1.InstanceType_builder{
 				Metadata: privatev1.Metadata_builder{
@@ -449,7 +449,7 @@ var _ = Describe("Private instance types", func() {
 		status, ok := grpcstatus.FromError(err)
 		Expect(ok).To(BeTrue())
 		Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
-		Expect(status.Message()).To(ContainSubstring("spec.cores"))
+		Expect(status.Message()).To(ContainSubstring("spec.vcpus"))
 		Expect(status.Message()).To(ContainSubstring("immutable"))
 	})
 

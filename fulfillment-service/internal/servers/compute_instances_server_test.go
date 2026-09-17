@@ -233,7 +233,7 @@ var _ = Describe("Compute instances server", func() {
 					{
 						Name:        "cpu_count",
 						Title:       "CPU Count",
-						Description: "Number of CPU cores",
+						Description: "Number of CPU vcpus",
 						Required:    false,
 						Type:        "type.googleapis.com/google.protobuf.Int32Value",
 						Default:     cpuDefault,

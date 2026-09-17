@@ -234,7 +234,7 @@ func (b0 InstanceTypeDeprecation_builder) Build() *InstanceTypeDeprecation {
 	return m0
 }
 
-// Describes a pre-configured compute bundle (cores, memory) that can be referenced by name when creating VMs.
+// Describes a pre-configured compute bundle (vCPUs, memory) that can be referenced by name when creating VMs.
 //
 // Instance types are admin-managed catalog resources. Tenant users select an instance type by name instead
 // of specifying raw compute resources. Cloud Provider Admins control the available configurations through
