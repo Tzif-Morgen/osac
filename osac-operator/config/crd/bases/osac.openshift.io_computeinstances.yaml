@@ -21,7 +21,7 @@ spec:
       name: Template
       type: string
     - jsonPath: .spec.vcpus
-      name: VCPUs
+      name: vCPUs
       type: integer
     - jsonPath: .spec.memoryGiB
       name: Memory

@@ -340,7 +340,7 @@ type ComputeInstanceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ci
 // +kubebuilder:printcolumn:name="Template",type=string,JSONPath=`.spec.templateID`
-// +kubebuilder:printcolumn:name="VCPUs",type=integer,JSONPath=`.spec.vcpus`
+// +kubebuilder:printcolumn:name="vCPUs",type=integer,JSONPath=`.spec.vcpus`
 // +kubebuilder:printcolumn:name="Memory",type=integer,JSONPath=`.spec.memoryGiB`
 // +kubebuilder:printcolumn:name="OS",type=string,JSONPath=`.spec.guestOSFamily`
 // +kubebuilder:printcolumn:name="RunStrategy",type=string,JSONPath=`.spec.runStrategy`
