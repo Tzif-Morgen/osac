@@ -8,7 +8,7 @@ spec:
   templateID: osac.templates.ocp_virt_vm
   networkAttachments:
     - subnetRef: test-subnet
-  cores: 4
+  vcpus: 4
   memoryGiB: 8
   gpu:
     pciDeviceSelector: "10DE:2901"

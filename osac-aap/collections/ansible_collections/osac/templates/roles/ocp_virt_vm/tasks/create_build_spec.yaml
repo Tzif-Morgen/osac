@@ -12,7 +12,9 @@
     vm_template_spec:
       domain:
         cpu:
-          cores: "{{ vm_cpu_cores }}"
+          sockets: "{{ vm_cpu_sockets }}"
+          cores: 1
+          threads: 1
         memory:
           guest: "{{ vm_memory }}"
         resources:
@@ -53,8 +55,8 @@
     vm_template_spec:
       domain:
         cpu:
-          cores: "{{ vm_cpu_cores }}"
-          sockets: 1
+          sockets: "{{ vm_cpu_sockets }}"
+          cores: 1
           threads: 1
         memory:
           guest: "{{ vm_memory }}"

@@ -7,7 +7,7 @@ metadata:
 spec:
   templateID: osac.templates.ocp_virt_vm
   guestOSFamily: "windows"
-  cores: 4
+  vcpus: 4
   memoryGiB: 8
   networkAttachments:
     - subnetRef: test-subnet

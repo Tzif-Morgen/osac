@@ -3,19 +3,19 @@
   ansible.builtin.set_fact:
     params: "{{ default_arg_specs | combine(template_parameters | default({})) }}"
 
-- name: Require spec.cores and spec.memoryGiB from resolved instance_type
+- name: Require spec.vcpus and spec.memoryGiB from resolved instance_type
   ansible.builtin.assert:
     that:
-      - compute_instance.spec.cores is defined
+      - compute_instance.spec.vcpus is defined
       - compute_instance.spec.memoryGiB is defined
     fail_msg: >-
-      ComputeInstance must have spec.cores and spec.memoryGiB set.
+      ComputeInstance must have spec.vcpus and spec.memoryGiB set.
       These are resolved by osac-operator from spec.instanceType — ensure the
       ComputeInstance (or its template) specifies a valid instance_type.
 
 - name: Extract VM configuration from ComputeInstance spec
   ansible.builtin.set_fact:
-    vm_cpu_cores: "{{ compute_instance.spec.cores | int }}"
+    vm_cpu_sockets: "{{ compute_instance.spec.vcpus | int }}"
     vm_memory: "{{ compute_instance.spec.memoryGiB | string + 'Gi' }}"
     vm_boot_disk_size: "{{ (compute_instance.spec.bootDisk.sizeGiB | default(default_spec.bootDisk.sizeGiB)) | string + 'Gi' }}"
     vm_image_source: "{{ compute_instance.spec.image.sourceRef | default(default_spec.image.sourceRef) }}"

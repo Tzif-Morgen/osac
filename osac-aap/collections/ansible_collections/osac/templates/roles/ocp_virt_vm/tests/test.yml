@@ -38,8 +38,8 @@
 #   Test 11 (Missing networkAttachments rejected):
 #     ansible-playbook ... -e test_create_missing_subnet_fails=true
 #
-#   Test 12 (Missing spec.cores/memoryGiB rejected):
-#     ansible-playbook ... -e test_create_missing_cores_fails=true
+#   Test 12 (Missing spec.vcpus/memoryGiB rejected):
+#     ansible-playbook ... -e test_create_missing_vcpus_fails=true
 #
 #   Test 13 (GPU single device, count=1):
 #     ansible-playbook ... -e test_create_gpu_single=true
@@ -99,12 +99,12 @@
               - compute_instance.metadata.name == "test-vm-defaults"
             fail_msg: "Compute instance name not extracted correctly"
 
-        - name: Verify CPU cores read from resolved spec
+        - name: Verify CPU vCPUs read from resolved spec
           ansible.builtin.assert:
             that:
-              - vm_cpu_cores is defined
-              - vm_cpu_cores | int == 2
-            fail_msg: "Expected cpu cores of 2 from spec.cores, got {{ vm_cpu_cores | default('undefined') }}"
+              - vm_cpu_sockets is defined
+              - vm_cpu_sockets | int == 2
+            fail_msg: "Expected 2 vCPUs from spec.vcpus, got {{ vm_cpu_sockets | default('undefined') }}"
 
         - name: Verify memory read from resolved spec
           ansible.builtin.assert:
@@ -338,11 +338,11 @@
             name: osac.templates.ocp_virt_vm
             tasks_from: create_validate.yaml
 
-        - name: Assert CPU cores come from spec (2 cores)
+        - name: Assert CPU vCPUs come from spec (2 vCPUs)
           ansible.builtin.assert:
             that:
-              - vm_cpu_cores | int == 2
-            fail_msg: "Expected 2 cores from spec.cores, got {{ vm_cpu_cores | default('undefined') }}"
+              - vm_cpu_sockets | int == 2
+            fail_msg: "Expected 2 vCPUs from spec.vcpus, got {{ vm_cpu_sockets | default('undefined') }}"
 
         - name: Assert memory comes from spec (2Gi)
           ansible.builtin.assert:
@@ -629,12 +629,12 @@
               is not set on the ComputeInstance
 
 # ──────────────────────────────────────────────────────────────
-# Test 12: Missing spec.cores/memoryGiB must fail validation
-# Expected: validation fails with message about spec.cores/spec.memoryGiB
+# Test 12: Missing spec.vcpus/memoryGiB must fail validation
+# Expected: validation fails with message about spec.vcpus/spec.memoryGiB
 # (these are resolved by osac-operator from instance_type; there is no
 # role-level default anymore since instance_type is mandatory)
 # ──────────────────────────────────────────────────────────────
-- name: "Test ocp_virt_vm -- missing spec.cores/memoryGiB rejected"
+- name: "Test ocp_virt_vm -- missing spec.vcpus/memoryGiB rejected"
   hosts: localhost
 
   collections:
@@ -644,17 +644,17 @@
     compute_instance_label: "osac.openshift.io/computeinstance"
 
   tasks:
-    - when: test_create_missing_cores_fails | default(false) | bool
+    - when: test_create_missing_vcpus_fails | default(false) | bool
       block:
-        - name: Read ComputeInstance fixture without spec.cores/memoryGiB
+        - name: Read ComputeInstance fixture without spec.vcpus/memoryGiB
           ansible.builtin.set_fact:
-            compute_instance: "{{ lookup('file', 'fixtures/computeinstance-missing-cores-test.yaml') | from_yaml }}"
+            compute_instance: "{{ lookup('file', 'fixtures/computeinstance-missing-vcpus-test.yaml') | from_yaml }}"
 
         - name: Set compute instance name
           ansible.builtin.set_fact:
             compute_instance_name: "{{ compute_instance.metadata.name }}"
 
-        - name: Run create_validate (expect failure — no spec.cores/memoryGiB)
+        - name: Run create_validate (expect failure — no spec.vcpus/memoryGiB)
           block:
             - name: Include create_validate
               ansible.builtin.include_role:
@@ -664,20 +664,20 @@
             - name: Capture error message
               ansible.builtin.set_fact:
                 validation_error: "{{ ansible_failed_result.msg | default('') }}"
-                missing_cores_failed: true
+                missing_vcpus_failed: true
 
-            - name: Verify failure was due to missing spec.cores/memoryGiB
+            - name: Verify failure was due to missing spec.vcpus/memoryGiB
               ansible.builtin.assert:
                 that:
-                  - "'spec.cores and spec.memoryGiB' in validation_error"
+                  - "'spec.vcpus and spec.memoryGiB' in validation_error"
                 fail_msg: "Validation failed for unexpected reason: {{ validation_error }}"
 
-        - name: Verify validation failed without spec.cores/memoryGiB
+        - name: Verify validation failed without spec.vcpus/memoryGiB
           ansible.builtin.assert:
             that:
-              - missing_cores_failed | default(false)
+              - missing_vcpus_failed | default(false)
             fail_msg: >-
-              Expected create_validate to fail when spec.cores/spec.memoryGiB
+              Expected create_validate to fail when spec.vcpus/spec.memoryGiB
               are not set on the ComputeInstance
 
 # ──────────────────────────────────────────────────────────────
@@ -1064,7 +1064,7 @@
                 namespace: osac-system
               spec:
                 templateID: osac.templates.ocp_virt_vm
-                cores: 2
+                vcpus: 2
                 memoryGiB: 2
                 networkAttachments:
                   - subnetRef: test-subnet
