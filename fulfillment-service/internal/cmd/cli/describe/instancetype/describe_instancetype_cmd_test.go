@@ -46,6 +46,7 @@ var _ = Describe("Rendering tests", func() {
 		}.Build()
 		output := formatInstanceType(it)
 		Expect(output).To(ContainSubstring("standard-4-16"))
+		Expect(output).To(ContainSubstring("vCPUs:"))
 		Expect(output).To(ContainSubstring("4"))
 		Expect(output).To(ContainSubstring("16"))
 		Expect(output).To(ContainSubstring("ACTIVE"))

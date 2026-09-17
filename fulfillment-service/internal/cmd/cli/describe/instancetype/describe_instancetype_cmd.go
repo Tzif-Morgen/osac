@@ -102,7 +102,7 @@ func renderInstanceType(w io.Writer, it *publicv1.InstanceType) {
 
 	spec := it.GetSpec()
 	if spec != nil {
-		fmt.Fprintf(writer, "VCPUs:\t%d\n", spec.GetVcpus())
+		fmt.Fprintf(writer, "vCPUs:\t%d\n", spec.GetVcpus())
 		fmt.Fprintf(writer, "Memory (GiB):\t%d\n", spec.GetMemoryGib())
 
 		if gpu := spec.GetGpu(); gpu != nil {
