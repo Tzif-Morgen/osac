@@ -18,7 +18,9 @@ package it
 
 import (
 	"context"
+	"time"
 
+	. "github.com/onsi/gomega"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 	publicv1 "github.com/osac-project/osac/proto/gen/osac/public/v1"
 )
@@ -47,6 +49,13 @@ func newComputeInstanceFixtureClients() computeInstanceFixtureClients {
 		storageBackends:          privatev1.NewStorageBackendsClient(tool.InternalView().AdminConn()),
 		diskImages:               privatev1.NewDiskImagesClient(tool.InternalView().AdminConn()),
 	}
+}
+
+func waitForComputeInstanceFixtureStorageBackend(ctx context.Context, client privatev1.StorageBackendsClient, id string) {
+	Eventually(func(g Gomega) {
+		_, err := client.Get(ctx, privatev1.StorageBackendsGetRequest_builder{Id: id}.Build())
+		g.Expect(err).ToNot(HaveOccurred())
+	}, time.Minute, time.Second).Should(Succeed())
 }
 
 func cleanupComputeInstanceFixture(

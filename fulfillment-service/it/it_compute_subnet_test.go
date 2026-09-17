@@ -86,6 +86,7 @@ var _ = Describe("ComputeInstance with Subnet attachment", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 		storageBackendId = sbResp.GetObject().GetId()
+		waitForComputeInstanceFixtureStorageBackend(ctx, storageBackendsClient, storageBackendId)
 
 		// Create StorageTier
 		stResp, err := storageTiersClient.Create(ctx, privatev1.StorageTiersCreateRequest_builder{
