@@ -455,7 +455,7 @@ func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	var existingComputeInstance *privatev1.ComputeInstance
 	var resizeWarnings []string
 	var resizeNoOp bool
-	if hasMaskPrefix(request.GetUpdateMask(), "spec.instance_type") {
+	if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
 		existingComputeInstance, resizeWarnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
 		if err != nil {
 			return
@@ -503,7 +503,7 @@ func onlyInstanceTypeMask(mask *fieldmaskpb.FieldMask) bool {
 		return false
 	}
 	for _, path := range paths {
-		if !hasMaskPrefix(&fieldmaskpb.FieldMask{Paths: []string{path}}, "spec.instance_type") {
+		if !updateIncludesField(&fieldmaskpb.FieldMask{Paths: []string{path}}, "spec.instance_type") {
 			return false
 		}
 	}
