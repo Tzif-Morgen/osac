@@ -132,7 +132,7 @@ func createCatalogItemComputeInstanceTypeFixture(ctx context.Context) string {
 	response, err := client.Create(ctx, privatev1.InstanceTypesCreateRequest_builder{
 		Object: privatev1.InstanceType_builder{
 			Metadata: catalogItemFixtureMetadata("shared", ""),
-			Spec:     privatev1.InstanceTypeSpec_builder{Cores: 2, MemoryGib: 4}.Build(),
+			Spec:     privatev1.InstanceTypeSpec_builder{Vcpus: 2, MemoryGib: 4}.Build(),
 		}.Build(),
 	}.Build())
 	Expect(err).NotTo(HaveOccurred())
