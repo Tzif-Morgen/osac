@@ -61,11 +61,11 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 		networkClassesClient = fixtureClients.networkClasses
 		diskImagesClient = fixtureClients.diskImages
 
-		storageBackendId = fmt.Sprintf("test-resize-sb-%s", uuid.New())
-		_, err := storageBackendsClient.Create(ctx, privatev1.StorageBackendsCreateRequest_builder{
+		requestedStorageBackendId := fmt.Sprintf("test-resize-sb-%s", uuid.New())
+		storageBackendResponse, err := storageBackendsClient.Create(ctx, privatev1.StorageBackendsCreateRequest_builder{
 			Object: privatev1.StorageBackend_builder{
-				Id:       storageBackendId,
-				Metadata: privatev1.Metadata_builder{Name: storageBackendId}.Build(),
+				Id:       requestedStorageBackendId,
+				Metadata: privatev1.Metadata_builder{Name: requestedStorageBackendId}.Build(),
 				Spec: privatev1.StorageBackendSpec_builder{
 					Provider:    "test",
 					Description: "Resize test backend",
@@ -78,6 +78,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		storageBackendId = storageBackendResponse.GetObject().GetId()
 		waitForComputeInstanceFixtureStorageBackend(ctx, storageBackendsClient, storageBackendId)
 
 		storageTierId = fmt.Sprintf("test-resize-st-%s", uuid.New())
