@@ -700,7 +700,7 @@ var _ = Describe("Private compute instance catalog items server", func() {
 							Name: name,
 						}.Build(),
 						Spec: privatev1.InstanceTypeSpec_builder{
-							Cores:     4,
+							Vcpus:     4,
 							MemoryGib: 16,
 						}.Build(),
 					}.Build(),
