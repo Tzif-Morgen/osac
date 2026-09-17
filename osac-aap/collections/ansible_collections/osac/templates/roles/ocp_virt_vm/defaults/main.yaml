@@ -28,7 +28,7 @@ default_arg_specs:
   exposed_ports: "22/tcp"
 
 # Defaults for ComputeInstance spec fields (Linux profile).
-# cores/memoryGiB are not defaulted here: they are resolved by osac-operator
+# vCPUs/memoryGiB are not defaulted here: they are resolved by osac-operator
 # from spec.instanceType (mandatory) and are always present on the CR by the
 # time this role runs.
 default_spec:

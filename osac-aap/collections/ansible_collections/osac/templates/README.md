@@ -69,7 +69,7 @@ The following are read from the `ComputeInstance` spec:
 
 | Spec Field | Description |
 |-----------|-------------|
-| `spec.cores` | Number of CPU cores |
+| `spec.vcpus` | Number of CPU vcpus |
 | `spec.memoryGiB` | Memory allocation in GiB |
 | `spec.bootDisk.sizeGiB` | Root disk size in GiB |
 | `spec.diskImage` | DiskImage reference (name or id) |
@@ -145,7 +145,7 @@ single file: `meta/osac.yaml`.
    template_type: compute_instance
 
    spec_defaults:
-     # cores/memory_gib are reserved (removed); instance_type is the sole,
+     # vcpus/memory_gib are reserved (removed); instance_type is the sole,
      # mandatory way to size a ComputeInstance. Set spec_defaults.instance_type
      # here to give the template a default, or omit it to require callers to
      # always pass instance_type explicitly.

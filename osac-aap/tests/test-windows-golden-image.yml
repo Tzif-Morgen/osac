@@ -22,7 +22,7 @@
           osac.openshift.io/tenant: "{{ test_namespace }}"
           osac.openshift.io/guest-os-family: "windows"
       spec:
-        cores: 4
+        vcpus: 4
         memoryGiB: 8
         bootDisk:
           sizeGiB: 80

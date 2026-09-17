@@ -11,7 +11,7 @@ from tests.e2e.core.osac_cli import OsacCLI
 
 pytestmark = pytest.mark.sanity
 
-TEST_CORES: int = 4
+TEST_VCPUS: int = 4
 TEST_MEMORY_GIB: int = 8
 
 TEST_GPU: dict[str, Any] = {"pci_device_selector": "10DE:20B0", "resource_name": "nvidia.com/A100", "count": 1}
@@ -31,7 +31,7 @@ def test_instance_type_lifecycle(cli: OsacCLI, private_grpc: GRPCClient) -> None
     try:
         # 1. CREATE via private gRPC (admin operation)
         private_grpc.create_instance_type(
-            name=it_name, cores=TEST_CORES, memory_gib=TEST_MEMORY_GIB, description="Lifecycle test type"
+            name=it_name, vcpus=TEST_VCPUS, memory_gib=TEST_MEMORY_GIB, description="Lifecycle test type"
         )
         names: list[str] = private_grpc.list_instance_type_names()
         assert it_name in names, f"InstanceType {it_name} not found in list after create: {names}"
@@ -39,7 +39,7 @@ def test_instance_type_lifecycle(cli: OsacCLI, private_grpc: GRPCClient) -> None
         # 2. GET via gRPC (verify API fields)
         response: dict = private_grpc.get_instance_type(name=it_name)
         obj: dict = response["object"]
-        assert obj["spec"]["cores"] == TEST_CORES, f"spec.cores mismatch: {obj['spec']['cores']} != {TEST_CORES}"
+        assert obj["spec"]["vcpus"] == TEST_VCPUS, f"spec.vcpus mismatch: {obj['spec']['vcpus']} != {TEST_VCPUS}"
         assert obj["spec"]["memoryGib"] == TEST_MEMORY_GIB, (
             f"spec.memoryGib mismatch: {obj['spec']['memoryGib']} != {TEST_MEMORY_GIB}"
         )
@@ -89,7 +89,7 @@ def test_create_instance_type_via_cli(private_cli: OsacCLI, private_grpc: GRPCCl
     try:
         private_cli.create_instance_type(
             name=it_name,
-            cores=TEST_CORES,
+            vcpus=TEST_VCPUS,
             memory_gib=TEST_MEMORY_GIB,
             description="CLI create test type",
             gpu_pci_device_selector=TEST_GPU["pci_device_selector"],
@@ -99,7 +99,7 @@ def test_create_instance_type_via_cli(private_cli: OsacCLI, private_grpc: GRPCCl
 
         response: dict = private_grpc.get_instance_type(name=it_name)
         spec: dict = response["object"]["spec"]
-        assert spec["cores"] == TEST_CORES, f"spec.cores mismatch: {spec['cores']} != {TEST_CORES}"
+        assert spec["vcpus"] == TEST_VCPUS, f"spec.vcpus mismatch: {spec['vcpus']} != {TEST_VCPUS}"
         assert spec["memoryGib"] == TEST_MEMORY_GIB, (
             f"spec.memoryGib mismatch: {spec['memoryGib']} != {TEST_MEMORY_GIB}"
         )
@@ -130,7 +130,7 @@ def test_gpu_instance_type(private_grpc: GRPCClient) -> None:
         # 1. CREATE GPU-enabled InstanceType and verify GPU fields
         private_grpc.create_instance_type(
             name=gpu_name,
-            cores=TEST_CORES,
+            vcpus=TEST_VCPUS,
             memory_gib=TEST_MEMORY_GIB,
             description="GPU lifecycle test type",
             gpu=TEST_GPU,
@@ -150,7 +150,7 @@ def test_gpu_instance_type(private_grpc: GRPCClient) -> None:
 
         # 2. LIST: GPU types are distinguishable from non-GPU types
         private_grpc.create_instance_type(
-            name=nogpu_name, cores=TEST_CORES, memory_gib=TEST_MEMORY_GIB, description="Non-GPU lifecycle test type"
+            name=nogpu_name, vcpus=TEST_VCPUS, memory_gib=TEST_MEMORY_GIB, description="Non-GPU lifecycle test type"
         )
 
         list_response: dict[str, Any] = private_grpc.call(service=f"{PRIVATE_API}.InstanceTypes/List")

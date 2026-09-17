@@ -22,7 +22,7 @@ from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import env
 
-DEFAULT_IT_CORES: int = 2
+DEFAULT_IT_VCPUS: int = 2
 DEFAULT_IT_MEMORY_GIB: int = 4
 
 # Shared DiskImage source for CLI-based ComputeInstance scaffolding. Pinned (not
@@ -126,7 +126,7 @@ def default_instance_type(private_grpc: GRPCClient, test_run_id: str) -> Iterato
     """Create a default ACTIVE instance type for VM tests; clean up after."""
     it_name = f"e2e-default-it-{test_run_id}"
     private_grpc.create_instance_type(
-        name=it_name, cores=DEFAULT_IT_CORES, memory_gib=DEFAULT_IT_MEMORY_GIB, description="Default E2E instance type"
+        name=it_name, vcpus=DEFAULT_IT_VCPUS, memory_gib=DEFAULT_IT_MEMORY_GIB, description="Default E2E instance type"
     )
     yield it_name
     try:

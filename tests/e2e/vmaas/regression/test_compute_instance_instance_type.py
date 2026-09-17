@@ -17,7 +17,7 @@ from tests.e2e.core.runner import run_unchecked
 
 pytestmark = pytest.mark.regression
 
-IT_CORES: int = 2
+IT_VCPUS: int = 2
 IT_MEMORY_GIB: int = 4
 
 
@@ -54,7 +54,7 @@ def active_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
     """Create an ACTIVE instance type for testing; clean up after."""
     it_name = f"e2e-ci-it-{uuid4().hex[:8]}"
     private_grpc.create_instance_type(
-        name=it_name, cores=IT_CORES, memory_gib=IT_MEMORY_GIB, description="E2E compute instance test type"
+        name=it_name, vcpus=IT_VCPUS, memory_gib=IT_MEMORY_GIB, description="E2E compute instance test type"
     )
     yield it_name
     try:
@@ -90,8 +90,8 @@ def test_compute_instance_happy_path(
         ci_name = wait_for_cr(k8s=k8s_hub_client, uuid=ci_uuid)
         ci_obj: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
         spec: dict[str, Any] = ci_obj["spec"]
-        assert spec["cores"] == IT_CORES, (
-            f"E2E-02: reconciler should expand cores from instance type: {spec['cores']} != {IT_CORES}"
+        assert spec["vcpus"] == IT_VCPUS, (
+            f"E2E-02: reconciler should expand vcpus from instance type: {spec['vcpus']} != {IT_VCPUS}"
         )
         assert spec["memoryGiB"] == IT_MEMORY_GIB, (
             f"E2E-02: reconciler should expand memory from instance type: {spec['memoryGiB']} != {IT_MEMORY_GIB}"

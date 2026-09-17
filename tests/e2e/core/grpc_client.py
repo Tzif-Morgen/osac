@@ -411,9 +411,9 @@ class GRPCClient:
     # InstanceType operations (private API only)
 
     def create_instance_type(
-        self, *, name: str, cores: int, memory_gib: int, description: str = "", gpu: dict[str, Any] | None = None
+        self, *, name: str, vcpus: int, memory_gib: int, description: str = "", gpu: dict[str, Any] | None = None
     ) -> str:
-        spec: dict[str, Any] = {"cores": cores, "memory_gib": memory_gib, "description": description}
+        spec: dict[str, Any] = {"vcpus": vcpus, "memory_gib": memory_gib, "description": description}
         if gpu is not None:
             spec["gpu"] = gpu
         response: dict[str, Any] = self.call(

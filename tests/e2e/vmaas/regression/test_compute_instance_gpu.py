@@ -15,14 +15,14 @@ from tests.e2e.core.runner import poll_until
 
 pytestmark = pytest.mark.regression
 
-GPU_IT_CORES: int = 2
+GPU_IT_VCPUS: int = 2
 GPU_IT_MEMORY_GIB: int = 4
 GPU_SPEC: dict[str, Any] = {"pci_device_selector": "10DE:25B6", "resource_name": "nvidia.com/gpu", "count": 1}
 
 
 def _create_gpu_instance_type(private_grpc: GRPCClient, name: str) -> None:
     private_grpc.create_instance_type(
-        name=name, cores=GPU_IT_CORES, memory_gib=GPU_IT_MEMORY_GIB, description="E2E GPU test type", gpu=GPU_SPEC
+        name=name, vcpus=GPU_IT_VCPUS, memory_gib=GPU_IT_MEMORY_GIB, description="E2E GPU test type", gpu=GPU_SPEC
     )
 
 
@@ -72,9 +72,9 @@ def test_gpu_compute_instance(
         ci_obj: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
         spec: dict[str, Any] = ci_obj["spec"]
 
-        # Reconciler expands cores and memory from the GPU InstanceType
-        assert spec["cores"] == GPU_IT_CORES, (
-            f"reconciler should expand cores from GPU instance type: {spec['cores']} != {GPU_IT_CORES}"
+        # Reconciler expands vcpus and memory from the GPU InstanceType
+        assert spec["vcpus"] == GPU_IT_VCPUS, (
+            f"reconciler should expand vcpus from GPU instance type: {spec['vcpus']} != {GPU_IT_VCPUS}"
         )
         assert spec["memoryGiB"] == GPU_IT_MEMORY_GIB, (
             f"reconciler should expand memory from GPU instance type: {spec['memoryGiB']} != {GPU_IT_MEMORY_GIB}"

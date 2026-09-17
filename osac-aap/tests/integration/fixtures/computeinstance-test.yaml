@@ -8,7 +8,7 @@ spec:
   templateID: osac.templates.ocp_virt_vm
   networkAttachments:
     - subnetRef: test-subnet
-  cores: 2
+  vcpus: 2
   memoryGiB: 4
   bootDisk:
     sizeGiB: 20

@@ -46,7 +46,7 @@ func newUnstructuredCI(name, namespace string, spec map[string]interface{}) *uns
 func ciSpec() map[string]interface{} {
 	return map[string]interface{}{
 		"templateID":  "test_template",
-		"cores":       int64(4),
+		"vcpus":       int64(4),
 		"memoryGiB":   int64(8),
 		"runStrategy": "Always",
 		"image": map[string]interface{}{

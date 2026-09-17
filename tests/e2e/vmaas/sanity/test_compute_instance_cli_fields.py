@@ -10,7 +10,7 @@ from tests.e2e.core.grpc_client import GRPCClient
 from tests.e2e.core.helpers import wait_for_cr, wait_for_deletion, wait_for_provision, wait_for_running
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
-from tests.e2e.vmaas.conftest import DEFAULT_IT_CORES, DEFAULT_IT_MEMORY_GIB
+from tests.e2e.vmaas.conftest import DEFAULT_IT_VCPUS, DEFAULT_IT_MEMORY_GIB
 
 pytestmark = pytest.mark.sanity
 
@@ -38,7 +38,7 @@ def test_compute_instance_cli_explicit_fields(
 
     ci_spec: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     spec: dict[str, Any] = ci_spec["spec"]
-    assert spec["cores"] == DEFAULT_IT_CORES, f"cores mismatch: {spec['cores']} != {DEFAULT_IT_CORES}"
+    assert spec["vcpus"] == DEFAULT_IT_VCPUS, f"vcpus mismatch: {spec['vcpus']} != {DEFAULT_IT_VCPUS}"
     assert spec["memoryGiB"] == DEFAULT_IT_MEMORY_GIB, (
         f"memoryGiB mismatch: {spec['memoryGiB']} != {DEFAULT_IT_MEMORY_GIB}"
     )

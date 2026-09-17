@@ -32,7 +32,7 @@ def compute_template() -> str:
 def ref_instance_type(private_grpc: GRPCClient) -> Generator[str, None, None]:
     tag = uuid4().hex[:8]
     name = f"ref-it-{tag}"
-    private_grpc.create_instance_type(name=name, cores=2, memory_gib=4)
+    private_grpc.create_instance_type(name=name, vcpus=2, memory_gib=4)
     yield name
     try:
         private_grpc.delete_instance_type(name=name)
@@ -276,8 +276,8 @@ class TestComputeReferences:
         active_name = f"ref-it-active-{tag}"
         deprecated_name = f"ref-it-depr-{tag}"
 
-        active_id = private_grpc.create_instance_type(name=active_name, cores=2, memory_gib=4)
-        private_grpc.create_instance_type(name=deprecated_name, cores=2, memory_gib=4)
+        active_id = private_grpc.create_instance_type(name=active_name, vcpus=2, memory_gib=4)
+        private_grpc.create_instance_type(name=deprecated_name, vcpus=2, memory_gib=4)
         try:
             private_grpc.call(
                 service=f"{PRIVATE_API}.InstanceTypes/Update",

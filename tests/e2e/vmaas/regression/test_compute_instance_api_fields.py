@@ -76,10 +76,10 @@ def test_compute_instance_api_fields(
     assert vm_strategy == "Always", f"VM runStrategy should be Always, got {vm_strategy}"
     assert vm_status == "Running", f"VM should be Running, got {vm_status}"
 
-    # Mutability: cores
-    _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"cores":8}}')
-    assert rc == 0, "cores update should succeed"
-    assert k8s_hub_client.get_jsonpath(resource="computeinstance", name=instance_name, jsonpath="{.spec.cores}") == "8"
+    # Mutability: vcpus
+    _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"vcpus":8}}')
+    assert rc == 0, "vcpus update should succeed"
+    assert k8s_hub_client.get_jsonpath(resource="computeinstance", name=instance_name, jsonpath="{.spec.vcpus}") == "8"
 
     # Mutability: memoryGiB
     _, rc = k8s_hub_client.patch(resource="computeinstance", name=instance_name, patch='{"spec":{"memoryGiB":16}}')

@@ -138,7 +138,7 @@ spec:
   image:
     sourceType: registry
     sourceRef: quay.io/fedora/fedora-coreos:stable
-  cores: 2
+  vcpus: 2
   memoryGiB: 4
   bootDisk:
     sizeGiB: 20

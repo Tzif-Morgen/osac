@@ -8,7 +8,7 @@
     }
   },
   "spec": {
-    "cores": 4,
+    "vcpus": 4,
     "memoryGiB": 8,
     "bootDisk": {
       "sizeGiB": 60
