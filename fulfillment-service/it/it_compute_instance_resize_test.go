@@ -78,6 +78,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		waitForComputeInstanceFixtureStorageBackend(ctx, storageBackendsClient, storageBackendId)
 
 		storageTierId = fmt.Sprintf("test-resize-st-%s", uuid.New())
 		_, err = storageTiersClient.Create(ctx, privatev1.StorageTiersCreateRequest_builder{
