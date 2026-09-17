@@ -25,6 +25,7 @@ import (
 var _ = Describe("ComputeInstance InstanceType resize", func() {
 	var (
 		ctx                            context.Context
+		fixtureClients                 computeInstanceFixtureClients
 		computeInstancesClient         publicv1.ComputeInstancesClient
 		computeInstanceTemplatesClient privatev1.ComputeInstanceTemplatesClient
 		instanceTypesClient            privatev1.InstanceTypesClient
@@ -49,15 +50,16 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		computeInstancesClient = publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
-		computeInstanceTemplatesClient = privatev1.NewComputeInstanceTemplatesClient(tool.InternalView().AdminConn())
-		instanceTypesClient = privatev1.NewInstanceTypesClient(tool.InternalView().AdminConn())
-		storageTiersClient = privatev1.NewStorageTiersClient(tool.InternalView().AdminConn())
-		storageBackendsClient = privatev1.NewStorageBackendsClient(tool.InternalView().AdminConn())
-		subnetsClient = privatev1.NewSubnetsClient(tool.InternalView().AdminConn())
-		virtualNetworksClient = privatev1.NewVirtualNetworksClient(tool.InternalView().AdminConn())
-		networkClassesClient = privatev1.NewNetworkClassesClient(tool.InternalView().AdminConn())
-		diskImagesClient = privatev1.NewDiskImagesClient(tool.InternalView().AdminConn())
+		fixtureClients = newComputeInstanceFixtureClients()
+		computeInstancesClient = fixtureClients.computeInstances
+		computeInstanceTemplatesClient = fixtureClients.computeInstanceTemplates
+		instanceTypesClient = fixtureClients.instanceTypes
+		storageTiersClient = fixtureClients.storageTiers
+		storageBackendsClient = fixtureClients.storageBackends
+		subnetsClient = fixtureClients.subnets
+		virtualNetworksClient = fixtureClients.virtualNetworks
+		networkClassesClient = fixtureClients.networkClasses
+		diskImagesClient = fixtureClients.diskImages
 
 		storageBackendId = fmt.Sprintf("test-resize-sb-%s", uuid.New())
 		_, err := storageBackendsClient.Create(ctx, privatev1.StorageBackendsCreateRequest_builder{
@@ -189,36 +191,8 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 	})
 
 	AfterEach(func() {
-		if computeInstanceId != "" {
-			computeInstancesClient.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: computeInstanceId}.Build())
-		}
-		if resizeInstanceTypeId != "" {
-			instanceTypesClient.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: resizeInstanceTypeId}.Build())
-		}
-		if instanceTypeId != "" {
-			instanceTypesClient.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: instanceTypeId}.Build())
-		}
-		if subnetId != "" {
-			subnetsClient.Delete(ctx, privatev1.SubnetsDeleteRequest_builder{Id: subnetId}.Build())
-		}
-		if virtualNetworkId != "" {
-			virtualNetworksClient.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkId}.Build())
-		}
-		if networkClassId != "" {
-			networkClassesClient.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassId}.Build())
-		}
-		if computeInstanceTemplateId != "" {
-			computeInstanceTemplatesClient.Delete(ctx, privatev1.ComputeInstanceTemplatesDeleteRequest_builder{Id: computeInstanceTemplateId}.Build())
-		}
-		if diskImageId != "" {
-			diskImagesClient.Delete(ctx, privatev1.DiskImagesDeleteRequest_builder{Id: diskImageId}.Build())
-		}
-		if storageTierId != "" {
-			storageTiersClient.Delete(ctx, privatev1.StorageTiersDeleteRequest_builder{Id: storageTierId}.Build())
-		}
-		if storageBackendId != "" {
-			storageBackendsClient.Delete(ctx, privatev1.StorageBackendsDeleteRequest_builder{Id: storageBackendId}.Build())
-		}
+		cleanupComputeInstanceFixture(ctx, fixtureClients, computeInstanceId, resizeInstanceTypeId, instanceTypeId,
+			subnetId, virtualNetworkId, networkClassId, computeInstanceTemplateId, diskImageId, storageTierId, storageBackendId)
 	})
 
 	It("updates ComputeInstance InstanceType through the public API", func() {
