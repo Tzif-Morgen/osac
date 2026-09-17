@@ -72,9 +72,9 @@ def test_gpu_compute_instance(
         ci_obj: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
         spec: dict[str, Any] = ci_obj["spec"]
 
-        # Reconciler expands vcpus and memory from the GPU InstanceType
+        # Reconciler expands vCPUs and memory from the GPU InstanceType
         assert spec["vcpus"] == GPU_IT_VCPUS, (
-            f"reconciler should expand vcpus from GPU instance type: {spec['vcpus']} != {GPU_IT_VCPUS}"
+            f"reconciler should expand vCPUs from GPU instance type: {spec['vcpus']} != {GPU_IT_VCPUS}"
         )
         assert spec["memoryGiB"] == GPU_IT_MEMORY_GIB, (
             f"reconciler should expand memory from GPU instance type: {spec['memoryGiB']} != {GPU_IT_MEMORY_GIB}"

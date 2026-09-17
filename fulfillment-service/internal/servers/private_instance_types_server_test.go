@@ -86,7 +86,7 @@ var _ = Describe("Private instance types server", func() {
 					Spec: privatev1.InstanceTypeSpec_builder{
 						Vcpus:       4,
 						MemoryGib:   16,
-						Description: "Standard 4 vcpus, 16 GiB RAM.",
+						Description: "Standard 4 vCPUs, 16 GiB RAM.",
 					}.Build(),
 				}.Build(),
 			}.Build())
@@ -193,7 +193,7 @@ var _ = Describe("Private instance types server", func() {
 					Spec: privatev1.InstanceTypeSpec_builder{
 						Vcpus:       4,
 						MemoryGib:   16,
-						Description: "Standard 4 vcpus, 16 GiB RAM.",
+						Description: "Standard 4 vCPUs, 16 GiB RAM.",
 					}.Build(),
 				}.Build(),
 			}.Build())
@@ -217,7 +217,7 @@ var _ = Describe("Private instance types server", func() {
 					Spec: privatev1.InstanceTypeSpec_builder{
 						Vcpus:       4,
 						MemoryGib:   16,
-						Description: "Standard 4 vcpus, 16 GiB RAM.",
+						Description: "Standard 4 vCPUs, 16 GiB RAM.",
 						Gpu: privatev1.GpuSpec_builder{
 							PciDeviceSelector: "10DE:20B0",
 							ResourceName:      "nvidia.com/A100",
@@ -261,7 +261,7 @@ var _ = Describe("Private instance types server", func() {
 					Spec: privatev1.InstanceTypeSpec_builder{
 						Vcpus:       4,
 						MemoryGib:   16,
-						Description: "Standard 4 vcpus, 16 GiB RAM.",
+						Description: "Standard 4 vCPUs, 16 GiB RAM.",
 						Gpu: privatev1.GpuSpec_builder{
 							PciDeviceSelector: "10DE:20B0",
 							ResourceName:      "nvidia.com/A100",
@@ -707,7 +707,7 @@ var _ = Describe("Private instance types server", func() {
 
 		// Immutability tests (TEST-02)
 		Describe("Immutability", func() {
-			It("Rejects update of vcpus", func() {
+			It("Rejects update of vCPUs", func() {
 				createResponse, err := server.Create(ctx, privatev1.InstanceTypesCreateRequest_builder{
 					Object: privatev1.InstanceType_builder{
 						Metadata: privatev1.Metadata_builder{
@@ -1047,7 +1047,7 @@ var _ = Describe("Private instance types server", func() {
 			})
 		})
 
-		// Field-level validation (vcpus, memory_gib) is enforced by the
+		// Field-level validation (vCPUs, memory_gib) is enforced by the
 		// protovalidate interceptor, not the server handler. Unit tests bypass the
 		// interceptor chain, so those constraints cannot be covered here. See
 		// internal/validation/protovalidate_interceptor_test.go for coverage.
@@ -1061,7 +1061,7 @@ var _ = Describe("Private instance types server", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("Accepts valid vcpus and memory_gib", func() {
+			It("Accepts valid vCPUs and memory_gib", func() {
 				spec := privatev1.InstanceTypeSpec_builder{
 					Vcpus:     4,
 					MemoryGib: 16,
@@ -1070,7 +1070,7 @@ var _ = Describe("Private instance types server", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("Rejects vcpus equal to zero", func() {
+			It("Rejects vCPUs equal to zero", func() {
 				spec := privatev1.InstanceTypeSpec_builder{
 					Vcpus:     0,
 					MemoryGib: 16,
@@ -1090,7 +1090,7 @@ var _ = Describe("Private instance types server", func() {
 				Expect(err.Error()).To(ContainSubstring("memory_gib"))
 			})
 
-			It("Rejects negative vcpus", func() {
+			It("Rejects negative vCPUs", func() {
 				spec := privatev1.InstanceTypeSpec_builder{
 					Vcpus:     -1,
 					MemoryGib: 16,

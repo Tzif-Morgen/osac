@@ -412,7 +412,7 @@ var _ = Describe("Private instance types", func() {
 
 	// Error scenarios (D-04)
 
-	It("Rejects update of immutable field vcpus", func() {
+	It("Rejects update of immutable field vCPUs", func() {
 		name := fmt.Sprintf("it-immut-vcpus-%s", uuid.New())
 		_, err := client.Create(ctx, privatev1.InstanceTypesCreateRequest_builder{
 			Object: privatev1.InstanceType_builder{
@@ -433,7 +433,7 @@ var _ = Describe("Private instance types", func() {
 			}.Build())
 		})
 
-		// Attempt to change vcpus:
+		// Attempt to change vCPUs:
 		_, err = client.Update(ctx, privatev1.InstanceTypesUpdateRequest_builder{
 			Object: privatev1.InstanceType_builder{
 				Metadata: privatev1.Metadata_builder{

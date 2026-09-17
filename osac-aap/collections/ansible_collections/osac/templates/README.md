@@ -69,7 +69,7 @@ The following are read from the `ComputeInstance` spec:
 
 | Spec Field | Description |
 |-----------|-------------|
-| `spec.vcpus` | Number of CPU vcpus |
+| `spec.vcpus` | Number of vCPUs |
 | `spec.memoryGiB` | Memory allocation in GiB |
 | `spec.bootDisk.sizeGiB` | Root disk size in GiB |
 | `spec.diskImage` | DiskImage reference (name or id) |

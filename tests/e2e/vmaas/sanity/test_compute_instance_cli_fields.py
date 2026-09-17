@@ -38,7 +38,7 @@ def test_compute_instance_cli_explicit_fields(
 
     ci_spec: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     spec: dict[str, Any] = ci_spec["spec"]
-    assert spec["vcpus"] == DEFAULT_IT_VCPUS, f"vcpus mismatch: {spec['vcpus']} != {DEFAULT_IT_VCPUS}"
+    assert spec["vcpus"] == DEFAULT_IT_VCPUS, f"vCPUs mismatch: {spec['vcpus']} != {DEFAULT_IT_VCPUS}"
     assert spec["memoryGiB"] == DEFAULT_IT_MEMORY_GIB, (
         f"memoryGiB mismatch: {spec['memoryGiB']} != {DEFAULT_IT_MEMORY_GIB}"
     )

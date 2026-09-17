@@ -850,7 +850,7 @@ var _ = Describe("Protovalidate interceptor", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("Rejects create request with zero vcpus", func() {
+		It("Rejects create request with zero vCPUs", func() {
 			request := privatev1.InstanceTypesCreateRequest_builder{
 				Object: privatev1.InstanceType_builder{
 					Metadata: privatev1.Metadata_builder{

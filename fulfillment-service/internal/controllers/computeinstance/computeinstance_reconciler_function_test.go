@@ -1894,7 +1894,7 @@ var _ = Describe("instance_type resolution in reconciler", func() {
 			Build()
 	})
 
-	It("resolves instance_type to vcpus/memory_gib on CR spec", func() {
+	It("resolves instance_type to vCPUs/memory_gib on CR spec", func() {
 		mockInstanceTypesClient := NewMockInstanceTypesClient(ctrl)
 		mockInstanceTypesClient.EXPECT().
 			Get(gomock.Any(), gomock.Any()).

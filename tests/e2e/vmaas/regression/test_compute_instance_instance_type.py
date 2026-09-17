@@ -91,7 +91,7 @@ def test_compute_instance_happy_path(
         ci_obj: dict[str, Any] = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
         spec: dict[str, Any] = ci_obj["spec"]
         assert spec["vcpus"] == IT_VCPUS, (
-            f"E2E-02: reconciler should expand vcpus from instance type: {spec['vcpus']} != {IT_VCPUS}"
+            f"E2E-02: reconciler should expand vCPUs from instance type: {spec['vcpus']} != {IT_VCPUS}"
         )
         assert spec["memoryGiB"] == IT_MEMORY_GIB, (
             f"E2E-02: reconciler should expand memory from instance type: {spec['memoryGiB']} != {IT_MEMORY_GIB}"

@@ -318,7 +318,7 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 			//
 			// To prevent nil-to-value transitions would require parent-level validation using has() checks,
 			// or a validating webhook. For the current use case, this limitation is acceptable since:
-			// 1. Most immutable fields are required (vcpus, memory, etc.)
+			// 1. Most immutable fields are required (vCPUs, memory, etc.)
 			// 2. Optional immutable fields (userDataSecretRef, sshKey) are typically set at creation
 			// 3. Changing a set value IS prevented by the validation
 			instance := createValidInstance("test-add-userdata")
@@ -354,14 +354,14 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 	})
 
 	Describe("Mutable fields", func() {
-		It("should allow changing vcpus", func() {
+		It("should allow changing vCPUs", func() {
 			instance := createValidInstance("test-vcpus-mutable")
 			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
 
 			// Fetch latest version
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
 
-			// Change vcpus - should succeed
+			// Change vCPUs - should succeed
 			instance.Spec.VCPUs = 4
 			Expect(k8sClient.Update(ctx, instance)).To(Succeed())
 
@@ -370,7 +370,7 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 			Expect(instance.Spec.VCPUs).To(Equal(int32(4)))
 		})
 
-		It("should reject updating vcpus outside the allowed range", func() {
+		It("should reject updating vCPUs outside the allowed range", func() {
 			instance := createValidInstance("test-vcpus-bounds")
 			Expect(k8sClient.Create(ctx, instance)).To(Succeed())
 
