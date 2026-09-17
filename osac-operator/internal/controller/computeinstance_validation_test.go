@@ -733,7 +733,7 @@ var _ = Describe("ComputeInstance CEL Validation", func() {
 			Entry("simple name", "test-tier-simple", "standard"),
 			Entry("with hyphens", "test-tier-hyphens", "high-perf"),
 			Entry("with dots", "test-tier-dots", "high.perf.ssd"),
-			Entry("with undersvcpus", "test-tier-undersvcpus", "tier_1"),
+			Entry("with underscores", "test-tier-underscores", "tier_1"),
 			Entry("mixed separators", "test-tier-mixed", "fast.ssd-v2-r1"),
 			Entry("single char", "test-tier-single", "a"),
 		)
