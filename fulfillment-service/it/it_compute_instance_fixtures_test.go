@@ -39,7 +39,7 @@ type computeInstanceFixtureClients struct {
 	diskImages               privatev1.DiskImagesClient
 }
 
-const storageBackendProbeTimeout = 10 * time.Second
+const computeInstanceFixtureProbeTimeout = 10 * time.Second
 
 func newComputeInstanceFixtureClients() computeInstanceFixtureClients {
 	return computeInstanceFixtureClients{
@@ -57,7 +57,7 @@ func newComputeInstanceFixtureClients() computeInstanceFixtureClients {
 
 func waitForComputeInstanceFixtureStorageBackend(ctx context.Context, client privatev1.StorageBackendsClient, id string) {
 	Eventually(func(g Gomega) {
-		probeCtx, cancel := context.WithTimeout(ctx, storageBackendProbeTimeout)
+		probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
 		defer cancel()
 		_, err := client.Get(probeCtx, privatev1.StorageBackendsGetRequest_builder{Id: id}.Build())
 		g.Expect(err).ToNot(HaveOccurred())
@@ -90,7 +90,9 @@ func cleanupComputeInstanceFixture(
 		_, err := clients.virtualNetworks.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
 		expectFixtureDelete(err)
 		Eventually(func(g Gomega) {
-			_, getErr := clients.virtualNetworks.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
+			probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+			defer cancel()
+			_, getErr := clients.virtualNetworks.Get(probeCtx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
 			g.Expect(grpcstatus.Code(getErr)).To(Equal(grpccodes.NotFound))
 		}, time.Minute, time.Second).Should(Succeed())
 	}
