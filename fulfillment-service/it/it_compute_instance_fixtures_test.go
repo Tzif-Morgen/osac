@@ -25,6 +25,7 @@ import (
 	publicv1 "github.com/osac-project/osac/proto/gen/osac/public/v1"
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 type computeInstanceFixtureClients struct {
@@ -72,6 +73,29 @@ func waitForComputeInstanceFixtureResource(ctx context.Context, get func(context
 	}, time.Minute, time.Second).Should(Succeed())
 }
 
+func setComputeInstanceFixtureVirtualNetworkReady(ctx context.Context, client privatev1.VirtualNetworksClient, id string) {
+	Eventually(func(g Gomega) {
+		probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+		defer cancel()
+		resp, err := client.Get(probeCtx, privatev1.VirtualNetworksGetRequest_builder{Id: id}.Build())
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(resp.GetObject().GetStatus().GetState()).To(
+			Equal(privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_PENDING))
+	}, time.Minute, time.Second).Should(Succeed())
+
+	resp, err := client.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{Id: id}.Build())
+	Expect(err).ToNot(HaveOccurred())
+	virtualNetwork := resp.GetObject()
+	virtualNetwork.SetStatus(privatev1.VirtualNetworkStatus_builder{
+		State: privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_READY,
+	}.Build())
+	_, err = client.Update(ctx, privatev1.VirtualNetworksUpdateRequest_builder{
+		Object:     virtualNetwork,
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.state"}},
+	}.Build())
+	Expect(err).ToNot(HaveOccurred())
+}
+
 func cleanupComputeInstanceFixture(
 	ctx context.Context,
 	clients computeInstanceFixtureClients,
@@ -112,13 +136,9 @@ func cleanupComputeInstanceFixture(
 			})
 	}
 	if subnetID != "" {
-		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+		deleteComputeInstanceFixtureResource(ctx,
 			func(deleteCtx context.Context) error {
 				_, err := clients.subnets.Delete(deleteCtx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
-				return err
-			},
-			func(getCtx context.Context) error {
-				_, err := clients.subnets.Get(getCtx, privatev1.SubnetsGetRequest_builder{Id: subnetID}.Build())
 				return err
 			})
 	}

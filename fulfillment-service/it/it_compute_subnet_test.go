@@ -192,32 +192,9 @@ var _ = Describe("ComputeInstance with Subnet attachment", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 
-		// Wait for the VN reconciler to finish initial processing before
-		// overriding state, same as the subnet wait below.
-		Eventually(func(g Gomega) {
-			resp, err := virtualNetworksClient.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{
-				Id: virtualNetworkId,
-			}.Build())
-			g.Expect(err).ToNot(HaveOccurred())
-			g.Expect(resp.GetObject().GetStatus().GetState()).To(
-				Equal(privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_PENDING))
-		}, time.Minute, time.Second).Should(Succeed())
-
-		// Set VirtualNetwork to READY state via private Update API
-		// In IT environment there is no osac-operator/feedback controller to reconcile state
-		vnGetResp, err := virtualNetworksClient.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{
-			Id: virtualNetworkId,
-		}.Build())
-		Expect(err).ToNot(HaveOccurred())
-		vn := vnGetResp.GetObject()
-		vn.SetStatus(privatev1.VirtualNetworkStatus_builder{
-			State: privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_READY,
-		}.Build())
-		_, err = virtualNetworksClient.Update(ctx, privatev1.VirtualNetworksUpdateRequest_builder{
-			Object:     vn,
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.state"}},
-		}.Build())
-		Expect(err).ToNot(HaveOccurred())
+		// Set VirtualNetwork to READY state via private Update API.
+		// In IT environment there is no osac-operator/feedback controller to reconcile state.
+		setComputeInstanceFixtureVirtualNetworkReady(ctx, virtualNetworksClient, virtualNetworkId)
 
 		// Create Subnet
 		subnetId = fmt.Sprintf("test-subnet-%s", uuid.New())

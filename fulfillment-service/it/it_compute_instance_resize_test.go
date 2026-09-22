@@ -167,6 +167,9 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		// Set VirtualNetwork to READY state via private Update API.
+		// In IT environment there is no osac-operator/feedback controller to reconcile state.
+		setComputeInstanceFixtureVirtualNetworkReady(ctx, virtualNetworksClient, virtualNetworkId)
 
 		subnetId = fmt.Sprintf("test-resize-subnet-%s", uuid.New())
 		_, err = subnetsClient.Create(ctx, privatev1.SubnetsCreateRequest_builder{
