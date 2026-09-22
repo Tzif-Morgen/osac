@@ -71,54 +71,135 @@ func cleanupComputeInstanceFixture(
 	networkClassID, computeInstanceTemplateID, diskImageID, storageTierID, storageBackendID string,
 ) {
 	if computeInstanceID != "" {
-		_, err := clients.computeInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: computeInstanceID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.computeInstances.Delete(deleteCtx, publicv1.ComputeInstancesDeleteRequest_builder{Id: computeInstanceID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.computeInstances.Get(getCtx, publicv1.ComputeInstancesGetRequest_builder{Id: computeInstanceID}.Build())
+				return err
+			})
 	}
 	if resizeInstanceTypeID != "" {
-		_, err := clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: resizeInstanceTypeID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.instanceTypes.Delete(deleteCtx, privatev1.InstanceTypesDeleteRequest_builder{Id: resizeInstanceTypeID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.instanceTypes.Get(getCtx, privatev1.InstanceTypesGetRequest_builder{Id: resizeInstanceTypeID}.Build())
+				return err
+			})
 	}
 	if instanceTypeID != "" {
-		_, err := clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: instanceTypeID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.instanceTypes.Delete(deleteCtx, privatev1.InstanceTypesDeleteRequest_builder{Id: instanceTypeID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.instanceTypes.Get(getCtx, privatev1.InstanceTypesGetRequest_builder{Id: instanceTypeID}.Build())
+				return err
+			})
 	}
 	if subnetID != "" {
-		_, err := clients.subnets.Delete(ctx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.subnets.Delete(deleteCtx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.subnets.Get(getCtx, privatev1.SubnetsGetRequest_builder{Id: subnetID}.Build())
+				return err
+			})
 	}
 	if virtualNetworkID != "" {
-		_, err := clients.virtualNetworks.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
-		expectFixtureDelete(err)
-		Eventually(func(g Gomega) {
-			probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
-			defer cancel()
-			_, getErr := clients.virtualNetworks.Get(probeCtx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
-			g.Expect(grpcstatus.Code(getErr)).To(Equal(grpccodes.NotFound))
-		}, time.Minute, time.Second).Should(Succeed())
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.virtualNetworks.Delete(deleteCtx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.virtualNetworks.Get(getCtx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
+				return err
+			})
 	}
 	if networkClassID != "" {
-		_, err := clients.networkClasses.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.networkClasses.Delete(deleteCtx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.networkClasses.Get(getCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassID}.Build())
+				return err
+			})
 	}
 	if computeInstanceTemplateID != "" {
-		_, err := clients.computeInstanceTemplates.Delete(ctx, privatev1.ComputeInstanceTemplatesDeleteRequest_builder{Id: computeInstanceTemplateID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.computeInstanceTemplates.Delete(deleteCtx, privatev1.ComputeInstanceTemplatesDeleteRequest_builder{Id: computeInstanceTemplateID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.computeInstanceTemplates.Get(getCtx, privatev1.ComputeInstanceTemplatesGetRequest_builder{Id: computeInstanceTemplateID}.Build())
+				return err
+			})
 	}
 	if diskImageID != "" {
-		_, err := clients.diskImages.Delete(ctx, privatev1.DiskImagesDeleteRequest_builder{Id: diskImageID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.diskImages.Delete(deleteCtx, privatev1.DiskImagesDeleteRequest_builder{Id: diskImageID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.diskImages.Get(getCtx, privatev1.DiskImagesGetRequest_builder{Id: diskImageID}.Build())
+				return err
+			})
 	}
 	if storageTierID != "" {
-		_, err := clients.storageTiers.Delete(ctx, privatev1.StorageTiersDeleteRequest_builder{Id: storageTierID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.storageTiers.Delete(deleteCtx, privatev1.StorageTiersDeleteRequest_builder{Id: storageTierID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.storageTiers.Get(getCtx, privatev1.StorageTiersGetRequest_builder{Id: storageTierID}.Build())
+				return err
+			})
 	}
 	if storageBackendID != "" {
-		_, err := clients.storageBackends.Delete(ctx, privatev1.StorageBackendsDeleteRequest_builder{Id: storageBackendID}.Build())
-		expectFixtureDelete(err)
+		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+			func(deleteCtx context.Context) error {
+				_, err := clients.storageBackends.Delete(deleteCtx, privatev1.StorageBackendsDeleteRequest_builder{Id: storageBackendID}.Build())
+				return err
+			},
+			func(getCtx context.Context) error {
+				_, err := clients.storageBackends.Get(getCtx, privatev1.StorageBackendsGetRequest_builder{Id: storageBackendID}.Build())
+				return err
+			})
 	}
 }
 
-func expectFixtureDelete(err error) {
-	Expect(err == nil || grpcstatus.Code(err) == grpccodes.NotFound).To(BeTrue(),
+func deleteAndWaitForComputeInstanceFixtureResource(ctx context.Context, delete func(context.Context) error, get func(context.Context) error) {
+	err := delete(ctx)
+	if !expectFixtureDelete(err) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	Eventually(func(g Gomega) {
+		probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+		defer cancel()
+		g.Expect(grpcstatus.Code(get(probeCtx))).To(Equal(grpccodes.NotFound))
+	}, time.Minute, time.Second).Should(Succeed())
+}
+
+func expectFixtureDelete(err error) bool {
+	ok := err == nil || grpcstatus.Code(err) == grpccodes.NotFound
+	Expect(ok).To(BeTrue(),
 		"fixture cleanup delete failed: %v", err)
+	return ok
 }
