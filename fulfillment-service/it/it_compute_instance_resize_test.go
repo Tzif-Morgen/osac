@@ -140,7 +140,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		networkClassId = fmt.Sprintf("test-resize-nc-%s", uuid.New())
-		_, err = networkClassesClient.Create(ctx, privatev1.NetworkClassesCreateRequest_builder{
+		ncResp, err := networkClassesClient.Create(ctx, privatev1.NetworkClassesCreateRequest_builder{
 			Object: privatev1.NetworkClass_builder{
 				Id:            networkClassId,
 				Metadata:      privatev1.Metadata_builder{Name: networkClassId}.Build(),
@@ -149,6 +149,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		networkClassId = ncResp.GetObject().GetId()
 		waitForComputeInstanceFixtureResource(ctx, func(probeCtx context.Context) error {
 			_, err := networkClassesClient.Get(probeCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassId}.Build())
 			return err

@@ -68,10 +68,23 @@ var _ = Describe("Default networking provisioning", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 		networkClassId = ncResp.GetObject().GetId()
-		DeferCleanup(func() {
-			_, _ = networkClassesClient.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{
-				Id: networkClassId,
-			}.Build())
+		DeferCleanup(func(cleanupCtx context.Context) {
+			if networkClassId == "" {
+				return
+			}
+			deleteAndWaitForComputeInstanceFixtureResource(cleanupCtx,
+				func(deleteCtx context.Context) error {
+					_, err := networkClassesClient.Delete(deleteCtx, privatev1.NetworkClassesDeleteRequest_builder{
+						Id: networkClassId,
+					}.Build())
+					return err
+				},
+				func(getCtx context.Context) error {
+					_, err := networkClassesClient.Get(getCtx, privatev1.NetworkClassesGetRequest_builder{
+						Id: networkClassId,
+					}.Build())
+					return err
+				})
 		})
 	})
 
