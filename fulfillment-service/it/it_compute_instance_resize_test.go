@@ -258,6 +258,13 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 		Expect(updatedObject.GetSpec().GetRunStrategy()).To(Equal(createdObject.GetSpec().GetRunStrategy()))
 		Expect(proto.Equal(updatedObject.GetSpec().GetBootDisk(), createdObject.GetSpec().GetBootDisk())).To(BeTrue())
 		Expect(proto.Equal(updatedObject.GetSpec().GetDiskImage(), createdObject.GetSpec().GetDiskImage())).To(BeTrue())
-		Expect(updatedObject.GetSpec().GetNetworkAttachments()).To(Equal(createdObject.GetSpec().GetNetworkAttachments()))
+		updatedAttachments := updatedObject.GetSpec().GetNetworkAttachments()
+		createdAttachments := createdObject.GetSpec().GetNetworkAttachments()
+		Expect(updatedAttachments).To(HaveLen(len(createdAttachments)))
+		if len(updatedAttachments) == len(createdAttachments) {
+			for i := range createdAttachments {
+				Expect(proto.Equal(updatedAttachments[i], createdAttachments[i])).To(BeTrue())
+			}
+		}
 	})
 })
