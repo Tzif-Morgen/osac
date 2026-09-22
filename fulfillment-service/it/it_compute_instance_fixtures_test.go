@@ -123,13 +123,13 @@ func cleanupComputeInstanceFixture(
 			})
 	}
 	if virtualNetworkID != "" {
-		deleteAndWaitForComputeInstanceFixtureResource(ctx,
+		// VirtualNetworks may have an operator finalizer, so Delete can acknowledge the
+		// soft delete while Get continues returning the object until asynchronous cleanup
+		// completes. The deletion timestamp is enough to release this fixture's dependency
+		// before deleting its NetworkClass.
+		deleteComputeInstanceFixtureResource(ctx,
 			func(deleteCtx context.Context) error {
 				_, err := clients.virtualNetworks.Delete(deleteCtx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
-				return err
-			},
-			func(getCtx context.Context) error {
-				_, err := clients.virtualNetworks.Get(getCtx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
 				return err
 			})
 	}
@@ -203,6 +203,11 @@ func deleteAndWaitForComputeInstanceFixtureResource(ctx context.Context, delete 
 		defer cancel()
 		g.Expect(grpcstatus.Code(get(probeCtx))).To(Equal(grpccodes.NotFound))
 	}, time.Minute, time.Second).Should(Succeed())
+}
+
+func deleteComputeInstanceFixtureResource(ctx context.Context, delete func(context.Context) error) {
+	err := delete(ctx)
+	expectFixtureDelete(err)
 }
 
 func expectFixtureDelete(err error) bool {

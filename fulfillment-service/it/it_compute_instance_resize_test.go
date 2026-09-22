@@ -139,11 +139,10 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 
-		networkClassId = fmt.Sprintf("test-resize-nc-%s", uuid.New())
+		networkClassName := fmt.Sprintf("test-resize-nc-%s", uuid.New())
 		ncResp, err := networkClassesClient.Create(ctx, privatev1.NetworkClassesCreateRequest_builder{
 			Object: privatev1.NetworkClass_builder{
-				Id:            networkClassId,
-				Metadata:      privatev1.Metadata_builder{Name: networkClassId}.Build(),
+				Metadata:      privatev1.Metadata_builder{Name: networkClassName}.Build(),
 				Title:         "Resize test network class",
 				FabricManager: new("netris"),
 			}.Build(),
