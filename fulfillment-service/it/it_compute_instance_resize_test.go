@@ -206,14 +206,14 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 				Spec: privatev1.InstanceTypeSpec_builder{
 					Vcpus:     4,
 					MemoryGib: 8,
-					State:     privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
+					State:     privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED,
 				}.Build(),
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 
 		computeInstanceId = fmt.Sprintf("test-resize-ci-%s", uuid.New())
-		_, err = computeInstancesClient.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
+		createResponse, err := computeInstancesClient.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
 			Object: publicv1.ComputeInstance_builder{
 				Id:       computeInstanceId,
 				Metadata: publicv1.Metadata_builder{Name: computeInstanceId}.Build(),
@@ -235,6 +235,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		createdObject := createResponse.GetObject()
 
 		updateResponse, err := computeInstancesClient.Update(ctx, publicv1.ComputeInstancesUpdateRequest_builder{
 			Object: publicv1.ComputeInstance_builder{
@@ -247,9 +248,16 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(updateResponse.GetObject().GetSpec().GetInstanceType().GetName()).To(Equal(resizeInstanceTypeId))
+		Expect(updateResponse.GetWarnings()).To(HaveLen(1))
 
 		getResponse, err := computeInstancesClient.Get(ctx, publicv1.ComputeInstancesGetRequest_builder{Id: computeInstanceId}.Build())
 		Expect(err).ToNot(HaveOccurred())
-		Expect(getResponse.GetObject().GetSpec().GetInstanceType().GetName()).To(Equal(resizeInstanceTypeId))
+		updatedObject := getResponse.GetObject()
+		Expect(updatedObject.GetSpec().GetInstanceType().GetName()).To(Equal(resizeInstanceTypeId))
+		Expect(proto.Equal(updatedObject.GetSpec().GetTemplate(), createdObject.GetSpec().GetTemplate())).To(BeTrue())
+		Expect(updatedObject.GetSpec().GetRunStrategy()).To(Equal(createdObject.GetSpec().GetRunStrategy()))
+		Expect(proto.Equal(updatedObject.GetSpec().GetBootDisk(), createdObject.GetSpec().GetBootDisk())).To(BeTrue())
+		Expect(proto.Equal(updatedObject.GetSpec().GetDiskImage(), createdObject.GetSpec().GetDiskImage())).To(BeTrue())
+		Expect(proto.Equal(updatedObject.GetSpec().GetNetworkAttachments(), createdObject.GetSpec().GetNetworkAttachments())).To(BeTrue())
 	})
 })

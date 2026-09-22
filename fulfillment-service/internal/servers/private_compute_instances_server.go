@@ -452,22 +452,19 @@ func (s *PrivateComputeInstancesServer) resolveCreationSource(ctx context.Contex
 
 func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	request *privatev1.ComputeInstancesUpdateRequest) (response *privatev1.ComputeInstancesUpdateResponse, err error) {
-	var existingComputeInstance *privatev1.ComputeInstance
 	var resizeWarnings []string
 	var resizeNoOp bool
 	if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
-		existingComputeInstance, resizeWarnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
+		_, resizeWarnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
 		if err != nil {
 			return
 		}
 	}
-	if resizeNoOp && onlyInstanceTypeMask(request.GetUpdateMask()) {
-		response = &privatev1.ComputeInstancesUpdateResponse{}
-		response.SetObject(existingComputeInstance)
-		return
-	}
-
 	err = s.generic.UpdateWithCandidatePreparation(ctx, request, &response, func(ctx context.Context, current, candidate *privatev1.ComputeInstance) error {
+		if resizeNoOp && onlyInstanceTypeMask(request.GetUpdateMask()) {
+			candidate.GetSpec().SetInstanceType(current.GetSpec().GetInstanceType())
+			return nil
+		}
 		if err := validateComputeInstanceImmutability(current, candidate, request.GetUpdateMask()); err != nil {
 			return err
 		}
@@ -503,7 +500,7 @@ func onlyInstanceTypeMask(mask *fieldmaskpb.FieldMask) bool {
 		return false
 	}
 	for _, path := range paths {
-		if !updateIncludesField(&fieldmaskpb.FieldMask{Paths: []string{path}}, "spec.instance_type") {
+		if path != "spec.instance_type" {
 			return false
 		}
 	}
@@ -630,46 +627,46 @@ func (s *PrivateComputeInstancesServer) validateInstanceTypeResize(
 	existing = getResponse.GetObject()
 	currentRef := existing.GetSpec().GetInstanceType()
 	targetRef := ci.GetSpec().GetInstanceType()
-	if refKey(currentRef) == refKey(targetRef) {
+	if currentRef == nil || targetRef == nil {
+		return nil, nil, false, grpcstatus.Errorf(grpccodes.InvalidArgument, "instance type is mandatory")
+	}
+	targetName := refKey(targetRef)
+	currentType, err := resolveAndCanonicalizeReference(
+		ctx, s.instanceTypesDao, existing.GetMetadata(), currentRef, "instance type", grpccodes.NotFound,
+	)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	targetType, err := resolveAndCanonicalizeReference(
+		ctx, s.instanceTypesDao, existing.GetMetadata(), targetRef, "instance type", grpccodes.NotFound,
+	)
+	if err != nil {
+		if grpcstatus.Code(err) == grpccodes.NotFound {
+			return nil, nil, false, grpcstatus.Errorf(
+				grpccodes.InvalidArgument,
+				"instance type '%s' not found",
+				targetName,
+			)
+		}
+		return nil, nil, false, err
+	}
+	if currentType.GetId() == targetType.GetId() {
 		return existing, nil, true, nil
 	}
 
-	targetName := refKey(targetRef)
-	warnings, err = validateInstanceTypeState(ctx, s.instanceTypesDao, targetName, "")
+	targetName = targetType.GetMetadata().GetName()
+	warnings, err = validateResolvedInstanceType(targetType, targetName, "")
 	if err != nil {
-		if grpcstatus.Code(err) == grpccodes.NotFound {
-			return nil, nil, false, grpcstatus.Errorf(
-				grpccodes.InvalidArgument,
-				"instance type '%s' not found",
-				targetName,
-			)
-		}
-		return nil, nil, false, err
-	}
-
-	currentResponse, err := s.instanceTypesDao.Get().SetId(refKey(currentRef)).Do(ctx)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	targetResponse, err := s.instanceTypesDao.Get().SetId(targetName).Do(ctx)
-	if err != nil {
-		if grpcstatus.Code(err) == grpccodes.NotFound {
-			return nil, nil, false, grpcstatus.Errorf(
-				grpccodes.InvalidArgument,
-				"instance type '%s' not found",
-				targetName,
-			)
-		}
 		return nil, nil, false, err
 	}
 	if !proto.Equal(
-		currentResponse.GetObject().GetSpec().GetGpu(),
-		targetResponse.GetObject().GetSpec().GetGpu(),
+		currentType.GetSpec().GetGpu(),
+		targetType.GetSpec().GetGpu(),
 	) {
 		return nil, nil, false, grpcstatus.Errorf(
 			grpccodes.FailedPrecondition,
 			"cannot change GPU configuration when resizing from instance type '%s' to '%s'",
-			refKey(currentRef),
+			currentType.GetMetadata().GetName(),
 			targetName,
 		)
 	}

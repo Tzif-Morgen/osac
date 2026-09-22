@@ -3092,7 +3092,7 @@ var _ = Describe("Private compute instances server", func() {
 				Expect(err).ToNot(HaveOccurred())
 			}
 
-			createInstanceTypeWithSpec := func(name string, state privatev1.InstanceTypeState, vcpus, memoryGib int32, gpu *privatev1.GpuSpec, deprecation *privatev1.InstanceTypeDeprecation) {
+			createInstanceTypeWithIdentity := func(id, name string, state privatev1.InstanceTypeState, vcpus, memoryGib int32, gpu *privatev1.GpuSpec, deprecation *privatev1.InstanceTypeDeprecation) {
 				instanceTypesDao, err := dao.NewGenericDAO[*privatev1.InstanceType]().
 					SetLogger(logger).
 					SetTenancyLogic(tenancy).
@@ -3101,7 +3101,7 @@ var _ = Describe("Private compute instances server", func() {
 
 				_, err = instanceTypesDao.Create().SetObject(
 					privatev1.InstanceType_builder{
-						Id: name,
+						Id: id,
 						Metadata: privatev1.Metadata_builder{
 							Name:   name,
 							Tenant: testTenant,
@@ -3116,6 +3116,10 @@ var _ = Describe("Private compute instances server", func() {
 					}.Build(),
 				).Do(ctx)
 				Expect(err).ToNot(HaveOccurred())
+			}
+
+			createInstanceTypeWithSpec := func(name string, state privatev1.InstanceTypeState, vcpus, memoryGib int32, gpu *privatev1.GpuSpec, deprecation *privatev1.InstanceTypeDeprecation) {
+				createInstanceTypeWithIdentity(name, name, state, vcpus, memoryGib, gpu, deprecation)
 			}
 
 			setInstanceTypeState := func(instanceTypeName string, state privatev1.InstanceTypeState) {
@@ -3259,6 +3263,32 @@ var _ = Describe("Private compute instances server", func() {
 				Expect(update("resize-small").GetObject().GetSpec().GetInstanceType().GetId()).To(Equal("resize-small"))
 			})
 
+			It("Resolves name-only current and target InstanceType references before comparison", func() {
+				createInstanceTypeWithIdentity("resize-current-id", "resize-current", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE, 4, 16, nil, nil)
+				createInstanceTypeWithIdentity("resize-target-id", "resize-target", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE, 8, 32, nil, nil)
+				id := createComputeInstanceWithType("resize-current-id")
+
+				stored, err := server.generic.dao.Get().SetId(id).Do(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				stored.GetObject().GetSpec().SetInstanceType(
+					privatev1.InstanceTypeReference_builder{Name: "resize-current"}.Build(),
+				)
+				_, err = server.generic.dao.Update().SetObject(stored.GetObject()).Do(ctx)
+				Expect(err).ToNot(HaveOccurred())
+
+				response, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+					Object: privatev1.ComputeInstance_builder{
+						Id: id,
+						Spec: privatev1.ComputeInstanceSpec_builder{
+							InstanceType: privatev1.InstanceTypeReference_builder{Name: "resize-target"}.Build(),
+						}.Build(),
+					}.Build(),
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"spec.instance_type"}},
+				}.Build())
+				Expect(err).ToNot(HaveOccurred())
+				Expect(response.GetObject().GetSpec().GetInstanceType().GetId()).To(Equal("resize-target-id"))
+			})
+
 			It("Returns a warning when resizing to a DEPRECATED InstanceType", func() {
 				createInstanceTypeWithSpec("resize-current", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE, 4, 16, nil, nil)
 				createInstanceTypeWithSpec("resize-deprecated", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED, 8, 32, nil,
@@ -3375,6 +3405,44 @@ var _ = Describe("Private compute instances server", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(response.GetWarnings()).To(BeEmpty())
 				Expect(response.GetObject().GetSpec().GetInstanceType().GetId()).To(Equal("resize-current"))
+			})
+
+			It("Rejects a stale optimistic-lock no-op update", func() {
+				createInstanceTypeWithSpec("resize-current", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE, 4, 16, nil, nil)
+				id := createComputeInstanceWithType("resize-current")
+				getResponse, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+				Expect(err).ToNot(HaveOccurred())
+
+				staleVersion := getResponse.GetObject().GetMetadata().GetVersion() - 1
+				response, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+					Object: privatev1.ComputeInstance_builder{
+						Id:       id,
+						Metadata: privatev1.Metadata_builder{Version: staleVersion}.Build(),
+						Spec: privatev1.ComputeInstanceSpec_builder{
+							InstanceType: privatev1.InstanceTypeReference_builder{Id: "resize-current"}.Build(),
+						}.Build(),
+					}.Build(),
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"spec.instance_type"}},
+					Lock:       true,
+				}.Build())
+				Expect(response).To(BeNil())
+				Expect(grpcstatus.Code(err)).To(Equal(grpccodes.Aborted))
+			})
+
+			It("Does not treat a parent spec mask as an InstanceType-only no-op", func() {
+				createInstanceTypeWithSpec("resize-current", privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE, 4, 16, nil, nil)
+				id := createComputeInstanceWithType("resize-current")
+				getResponse, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+				Expect(err).ToNot(HaveOccurred())
+				spec := getResponse.GetObject().GetSpec()
+				spec.SetRunStrategy(privatev1.ComputeInstanceRunStrategy_COMPUTE_INSTANCE_RUN_STRATEGY_HALTED)
+
+				response, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+					Object:     privatev1.ComputeInstance_builder{Id: id, Spec: spec}.Build(),
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"spec"}},
+				}.Build())
+				Expect(err).ToNot(HaveOccurred())
+				Expect(response.GetObject().GetSpec().GetRunStrategy()).To(Equal(privatev1.ComputeInstanceRunStrategy_COMPUTE_INSTANCE_RUN_STRATEGY_HALTED))
 			})
 		})
 
