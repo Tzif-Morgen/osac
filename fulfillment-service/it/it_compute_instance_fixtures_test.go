@@ -83,16 +83,20 @@ func setComputeInstanceFixtureVirtualNetworkReady(ctx context.Context, client pr
 			Equal(privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_PENDING))
 	}, time.Minute, time.Second).Should(Succeed())
 
-	resp, err := client.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{Id: id}.Build())
+	getCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+	resp, err := client.Get(getCtx, privatev1.VirtualNetworksGetRequest_builder{Id: id}.Build())
+	cancel()
 	Expect(err).ToNot(HaveOccurred())
 	virtualNetwork := resp.GetObject()
 	virtualNetwork.SetStatus(privatev1.VirtualNetworkStatus_builder{
 		State: privatev1.VirtualNetworkState_VIRTUAL_NETWORK_STATE_READY,
 	}.Build())
-	_, err = client.Update(ctx, privatev1.VirtualNetworksUpdateRequest_builder{
+	updateCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+	_, err = client.Update(updateCtx, privatev1.VirtualNetworksUpdateRequest_builder{
 		Object:     virtualNetwork,
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.state"}},
 	}.Build())
+	cancel()
 	Expect(err).ToNot(HaveOccurred())
 }
 
@@ -211,7 +215,9 @@ func cleanupComputeInstanceFixture(
 }
 
 func deleteAndWaitForComputeInstanceFixtureResource(ctx context.Context, delete func(context.Context) error, get func(context.Context) error) {
-	err := delete(ctx)
+	deleteCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+	err := delete(deleteCtx)
+	cancel()
 	if !expectFixtureDelete(err) {
 		return
 	}
@@ -226,7 +232,9 @@ func deleteAndWaitForComputeInstanceFixtureResource(ctx context.Context, delete 
 }
 
 func deleteComputeInstanceFixtureResource(ctx context.Context, delete func(context.Context) error) {
-	err := delete(ctx)
+	deleteCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+	err := delete(deleteCtx)
+	cancel()
 	expectFixtureDelete(err)
 }
 

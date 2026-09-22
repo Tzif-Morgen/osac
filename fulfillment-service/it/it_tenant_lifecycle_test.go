@@ -841,10 +841,6 @@ var _ = Describe("Multi-tenant resource isolation", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 		networkClassID := ncResp.GetObject().GetId()
-		waitForComputeInstanceFixtureResource(ctx, func(probeCtx context.Context) error {
-			_, err := networkClassClient.Get(probeCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassID}.Build())
-			return err
-		})
 		DeferCleanup(func(cleanupCtx context.Context) {
 			deleteAndWaitForComputeInstanceFixtureResource(cleanupCtx,
 				func(deleteCtx context.Context) error {
