@@ -149,6 +149,10 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+		waitForComputeInstanceFixtureResource(ctx, func(probeCtx context.Context) error {
+			_, err := networkClassesClient.Get(probeCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassId}.Build())
+			return err
+		})
 
 		virtualNetworkId = fmt.Sprintf("test-resize-vn-%s", uuid.New())
 		_, err = virtualNetworksClient.Create(ctx, privatev1.VirtualNetworksCreateRequest_builder{

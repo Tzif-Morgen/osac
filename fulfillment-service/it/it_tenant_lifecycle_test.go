@@ -840,13 +840,21 @@ var _ = Describe("Multi-tenant resource isolation", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
-		// Use a fresh context for cleanup: the ctx from this BeforeEach is cancelled by Ginkgo as soon as this
-		// node returns, so reusing it here would make the Delete call fail with "context canceled" and leak the
-		// NetworkClass — which is fatal now that only one NetworkClass may exist per deployment (OSAC-4073).
+		networkClassID := ncResp.GetObject().GetId()
+		waitForComputeInstanceFixtureResource(ctx, func(probeCtx context.Context) error {
+			_, err := networkClassClient.Get(probeCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassID}.Build())
+			return err
+		})
 		DeferCleanup(func(cleanupCtx context.Context) {
-			_, _ = networkClassClient.Delete(cleanupCtx, privatev1.NetworkClassesDeleteRequest_builder{
-				Id: ncResp.GetObject().GetId(),
-			}.Build())
+			deleteAndWaitForComputeInstanceFixtureResource(cleanupCtx,
+				func(deleteCtx context.Context) error {
+					_, err := networkClassClient.Delete(deleteCtx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
+					return err
+				},
+				func(getCtx context.Context) error {
+					_, err := networkClassClient.Get(getCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassID}.Build())
+					return err
+				})
 		})
 	})
 

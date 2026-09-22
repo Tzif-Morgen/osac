@@ -64,6 +64,14 @@ func waitForComputeInstanceFixtureStorageBackend(ctx context.Context, client pri
 	}, time.Minute, time.Second).Should(Succeed())
 }
 
+func waitForComputeInstanceFixtureResource(ctx context.Context, get func(context.Context) error) {
+	Eventually(func(g Gomega) {
+		probeCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+		defer cancel()
+		g.Expect(get(probeCtx)).ToNot(HaveOccurred())
+	}, time.Minute, time.Second).Should(Succeed())
+}
+
 func cleanupComputeInstanceFixture(
 	ctx context.Context,
 	clients computeInstanceFixtureClients,

@@ -169,6 +169,10 @@ var _ = Describe("ComputeInstance with Subnet attachment", func() {
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 		networkClassId = ncResp.GetObject().GetId()
+		waitForComputeInstanceFixtureResource(ctx, func(probeCtx context.Context) error {
+			_, err := networkClassesClient.Get(probeCtx, privatev1.NetworkClassesGetRequest_builder{Id: networkClassId}.Build())
+			return err
+		})
 
 		// Create VirtualNetwork
 		virtualNetworkId = fmt.Sprintf("test-vnet-%s", uuid.New())
