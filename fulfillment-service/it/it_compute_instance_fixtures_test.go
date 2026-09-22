@@ -67,38 +67,52 @@ func cleanupComputeInstanceFixture(
 	networkClassID, computeInstanceTemplateID, diskImageID, storageTierID, storageBackendID string,
 ) {
 	if computeInstanceID != "" {
-		clients.computeInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: computeInstanceID}.Build())
+		_, err := clients.computeInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: computeInstanceID}.Build())
+		expectFixtureDelete(err)
 	}
 	if resizeInstanceTypeID != "" {
-		clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: resizeInstanceTypeID}.Build())
+		_, err := clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: resizeInstanceTypeID}.Build())
+		expectFixtureDelete(err)
 	}
 	if instanceTypeID != "" {
-		clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: instanceTypeID}.Build())
+		_, err := clients.instanceTypes.Delete(ctx, privatev1.InstanceTypesDeleteRequest_builder{Id: instanceTypeID}.Build())
+		expectFixtureDelete(err)
 	}
 	if subnetID != "" {
-		clients.subnets.Delete(ctx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
+		_, err := clients.subnets.Delete(ctx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
+		expectFixtureDelete(err)
 	}
 	if virtualNetworkID != "" {
 		_, err := clients.virtualNetworks.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
-		Expect(err == nil || grpcstatus.Code(err) == grpccodes.NotFound).To(BeTrue())
+		expectFixtureDelete(err)
 		Eventually(func(g Gomega) {
 			_, getErr := clients.virtualNetworks.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
 			g.Expect(grpcstatus.Code(getErr)).To(Equal(grpccodes.NotFound))
 		}, time.Minute, time.Second).Should(Succeed())
 	}
 	if networkClassID != "" {
-		clients.networkClasses.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
+		_, err := clients.networkClasses.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
+		expectFixtureDelete(err)
 	}
 	if computeInstanceTemplateID != "" {
-		clients.computeInstanceTemplates.Delete(ctx, privatev1.ComputeInstanceTemplatesDeleteRequest_builder{Id: computeInstanceTemplateID}.Build())
+		_, err := clients.computeInstanceTemplates.Delete(ctx, privatev1.ComputeInstanceTemplatesDeleteRequest_builder{Id: computeInstanceTemplateID}.Build())
+		expectFixtureDelete(err)
 	}
 	if diskImageID != "" {
-		clients.diskImages.Delete(ctx, privatev1.DiskImagesDeleteRequest_builder{Id: diskImageID}.Build())
+		_, err := clients.diskImages.Delete(ctx, privatev1.DiskImagesDeleteRequest_builder{Id: diskImageID}.Build())
+		expectFixtureDelete(err)
 	}
 	if storageTierID != "" {
-		clients.storageTiers.Delete(ctx, privatev1.StorageTiersDeleteRequest_builder{Id: storageTierID}.Build())
+		_, err := clients.storageTiers.Delete(ctx, privatev1.StorageTiersDeleteRequest_builder{Id: storageTierID}.Build())
+		expectFixtureDelete(err)
 	}
 	if storageBackendID != "" {
-		clients.storageBackends.Delete(ctx, privatev1.StorageBackendsDeleteRequest_builder{Id: storageBackendID}.Build())
+		_, err := clients.storageBackends.Delete(ctx, privatev1.StorageBackendsDeleteRequest_builder{Id: storageBackendID}.Build())
+		expectFixtureDelete(err)
 	}
+}
+
+func expectFixtureDelete(err error) {
+	Expect(err == nil || grpcstatus.Code(err) == grpccodes.NotFound).To(BeTrue(),
+		"fixture cleanup delete failed: %v", err)
 }
