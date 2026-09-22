@@ -23,6 +23,8 @@ import (
 	. "github.com/onsi/gomega"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 	publicv1 "github.com/osac-project/osac/proto/gen/osac/public/v1"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 type computeInstanceFixtureClients struct {
@@ -77,7 +79,12 @@ func cleanupComputeInstanceFixture(
 		clients.subnets.Delete(ctx, privatev1.SubnetsDeleteRequest_builder{Id: subnetID}.Build())
 	}
 	if virtualNetworkID != "" {
-		clients.virtualNetworks.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
+		_, err := clients.virtualNetworks.Delete(ctx, privatev1.VirtualNetworksDeleteRequest_builder{Id: virtualNetworkID}.Build())
+		Expect(err == nil || grpcstatus.Code(err) == grpccodes.NotFound).To(BeTrue())
+		Eventually(func(g Gomega) {
+			_, getErr := clients.virtualNetworks.Get(ctx, privatev1.VirtualNetworksGetRequest_builder{Id: virtualNetworkID}.Build())
+			g.Expect(grpcstatus.Code(getErr)).To(Equal(grpccodes.NotFound))
+		}, time.Minute, time.Second).Should(Succeed())
 	}
 	if networkClassID != "" {
 		clients.networkClasses.Delete(ctx, privatev1.NetworkClassesDeleteRequest_builder{Id: networkClassID}.Build())
