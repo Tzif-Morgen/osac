@@ -72,7 +72,7 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 					Endpoint:    "https://test-backend.example.com",
 					Credentials: privatev1.StorageBackendCredentials_builder{
 						Username: "test-user",
-						Password: "test-credential",
+						Password: "test-credential", //nolint:goconst // test-only dummy credential for fake provider
 					}.Build(),
 				}.Build(),
 			}.Build(),
