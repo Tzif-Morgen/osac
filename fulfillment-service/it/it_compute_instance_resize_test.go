@@ -220,7 +220,9 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 			}.Build(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
-		_, err = instanceTypesClient.Update(ctx, privatev1.InstanceTypesUpdateRequest_builder{
+		updateCtx, cancel := context.WithTimeout(ctx, computeInstanceFixtureProbeTimeout)
+		defer cancel()
+		_, err = instanceTypesClient.Update(updateCtx, privatev1.InstanceTypesUpdateRequest_builder{
 			Object: privatev1.InstanceType_builder{
 				Id:       resizeInstanceTypeId,
 				Metadata: privatev1.Metadata_builder{Name: resizeInstanceTypeId}.Build(),
