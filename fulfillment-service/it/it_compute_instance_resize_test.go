@@ -215,9 +215,20 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 				Spec: privatev1.InstanceTypeSpec_builder{
 					Vcpus:     4,
 					MemoryGib: 8,
-					State:     privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED,
+					State:     privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_ACTIVE,
 				}.Build(),
 			}.Build(),
+		}.Build())
+		Expect(err).ToNot(HaveOccurred())
+		_, err = instanceTypesClient.Update(ctx, privatev1.InstanceTypesUpdateRequest_builder{
+			Object: privatev1.InstanceType_builder{
+				Id:       resizeInstanceTypeId,
+				Metadata: privatev1.Metadata_builder{Name: resizeInstanceTypeId}.Build(),
+				Spec: privatev1.InstanceTypeSpec_builder{
+					State: privatev1.InstanceTypeState_INSTANCE_TYPE_STATE_DEPRECATED,
+				}.Build(),
+			}.Build(),
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"spec.state"}},
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
 
