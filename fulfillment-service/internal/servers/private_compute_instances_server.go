@@ -452,10 +452,10 @@ func (s *PrivateComputeInstancesServer) resolveCreationSource(ctx context.Contex
 
 func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	request *privatev1.ComputeInstancesUpdateRequest) (response *privatev1.ComputeInstancesUpdateResponse, err error) {
-	var resizeWarnings []string
+	var warnings []string
 	var resizeNoOp bool
 	if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
-		_, resizeWarnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
+		_, warnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
 		if err != nil {
 			return
 		}
@@ -488,8 +488,8 @@ func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	if err != nil {
 		return
 	}
-	if len(resizeWarnings) > 0 {
-		response.SetWarnings(resizeWarnings)
+	if len(warnings) > 0 {
+		response.SetWarnings(warnings)
 	}
 	return
 }
