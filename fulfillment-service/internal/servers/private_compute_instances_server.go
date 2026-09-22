@@ -452,6 +452,16 @@ func (s *PrivateComputeInstancesServer) resolveCreationSource(ctx context.Contex
 
 func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	request *privatev1.ComputeInstancesUpdateRequest) (response *privatev1.ComputeInstancesUpdateResponse, err error) {
+	computeInstance := request.GetObject()
+	if computeInstance == nil {
+		err = grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance is mandatory")
+		return
+	}
+	if computeInstance.GetId() == "" {
+		err = grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance id is mandatory")
+		return
+	}
+
 	var warnings []string
 	var resizeNoOp bool
 	if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
@@ -613,12 +623,6 @@ func (s *PrivateComputeInstancesServer) validateInstanceTypeResize(
 	request *privatev1.ComputeInstancesUpdateRequest,
 ) (existing *privatev1.ComputeInstance, warnings []string, noOp bool, err error) {
 	ci := request.GetObject()
-	if ci == nil {
-		return nil, nil, false, grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance is mandatory")
-	}
-	if ci.GetId() == "" {
-		return nil, nil, false, grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance id is mandatory")
-	}
 
 	getResponse, err := s.generic.dao.Get().SetId(ci.GetId()).Do(ctx)
 	if err != nil {
