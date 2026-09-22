@@ -54,7 +54,9 @@ var _ = Describe("ComputeInstance with Subnet attachment", func() {
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		DeferCleanup(cancel)
 
 		fixtureClients = newComputeInstanceFixtureClients()
 		subnetsClient = fixtureClients.subnets

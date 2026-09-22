@@ -39,6 +39,8 @@ type computeInstanceFixtureClients struct {
 	diskImages               privatev1.DiskImagesClient
 }
 
+const storageBackendProbeTimeout = 10 * time.Second
+
 func newComputeInstanceFixtureClients() computeInstanceFixtureClients {
 	return computeInstanceFixtureClients{
 		subnets:                  privatev1.NewSubnetsClient(tool.InternalView().AdminConn()),
@@ -55,7 +57,9 @@ func newComputeInstanceFixtureClients() computeInstanceFixtureClients {
 
 func waitForComputeInstanceFixtureStorageBackend(ctx context.Context, client privatev1.StorageBackendsClient, id string) {
 	Eventually(func(g Gomega) {
-		_, err := client.Get(ctx, privatev1.StorageBackendsGetRequest_builder{Id: id}.Build())
+		probeCtx, cancel := context.WithTimeout(ctx, storageBackendProbeTimeout)
+		defer cancel()
+		_, err := client.Get(probeCtx, privatev1.StorageBackendsGetRequest_builder{Id: id}.Build())
 		g.Expect(err).ToNot(HaveOccurred())
 	}, time.Minute, time.Second).Should(Succeed())
 }

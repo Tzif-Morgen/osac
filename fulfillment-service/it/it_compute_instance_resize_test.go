@@ -49,7 +49,9 @@ var _ = Describe("ComputeInstance InstanceType resize", func() {
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		DeferCleanup(cancel)
 		fixtureClients = newComputeInstanceFixtureClients()
 		computeInstancesClient = fixtureClients.computeInstances
 		computeInstanceTemplatesClient = fixtureClients.computeInstanceTemplates
