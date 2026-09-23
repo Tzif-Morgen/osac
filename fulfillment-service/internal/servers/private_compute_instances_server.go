@@ -464,13 +464,13 @@ func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 
 	var warnings []string
 	var resizeNoOp bool
-	if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
-		_, warnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, request)
-		if err != nil {
-			return
-		}
-	}
 	err = s.generic.UpdateWithCandidatePreparation(ctx, request, &response, func(ctx context.Context, current, candidate *privatev1.ComputeInstance) error {
+		if updateIncludesField(request.GetUpdateMask(), "spec.instance_type") {
+			warnings, resizeNoOp, err = s.validateInstanceTypeResize(ctx, current, candidate)
+			if err != nil {
+				return err
+			}
+		}
 		if resizeNoOp && onlyInstanceTypeMask(request.GetUpdateMask()) {
 			candidate.GetSpec().SetInstanceType(current.GetSpec().GetInstanceType())
 			return nil
@@ -620,54 +620,47 @@ func (s *PrivateComputeInstancesServer) validateInstanceType(
 
 func (s *PrivateComputeInstancesServer) validateInstanceTypeResize(
 	ctx context.Context,
-	request *privatev1.ComputeInstancesUpdateRequest,
-) (existing *privatev1.ComputeInstance, warnings []string, noOp bool, err error) {
-	ci := request.GetObject()
-
-	getResponse, err := s.generic.dao.Get().SetId(ci.GetId()).Do(ctx)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	existing = getResponse.GetObject()
-	currentRef := existing.GetSpec().GetInstanceType()
-	targetRef := ci.GetSpec().GetInstanceType()
+	current, candidate *privatev1.ComputeInstance,
+) (warnings []string, noOp bool, err error) {
+	currentRef := current.GetSpec().GetInstanceType()
+	targetRef := candidate.GetSpec().GetInstanceType()
 	if currentRef == nil || targetRef == nil {
-		return nil, nil, false, grpcstatus.Errorf(grpccodes.InvalidArgument, "instance type is mandatory")
+		return nil, false, grpcstatus.Errorf(grpccodes.InvalidArgument, "instance type is mandatory")
 	}
 	targetName := refKey(targetRef)
 	currentType, err := resolveAndCanonicalizeReference(
-		ctx, s.instanceTypesDao, existing.GetMetadata(), currentRef, "instance type", grpccodes.NotFound,
+		ctx, s.instanceTypesDao, current.GetMetadata(), currentRef, "instance type", grpccodes.NotFound,
 	)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, false, err
 	}
 	targetType, err := resolveAndCanonicalizeReference(
-		ctx, s.instanceTypesDao, existing.GetMetadata(), targetRef, "instance type", grpccodes.NotFound,
+		ctx, s.instanceTypesDao, current.GetMetadata(), targetRef, "instance type", grpccodes.NotFound,
 	)
 	if err != nil {
 		if grpcstatus.Code(err) == grpccodes.NotFound {
-			return nil, nil, false, grpcstatus.Errorf(
+			return nil, false, grpcstatus.Errorf(
 				grpccodes.InvalidArgument,
 				"instance type '%s' not found",
 				targetName,
 			)
 		}
-		return nil, nil, false, err
+		return nil, false, err
 	}
 	if currentType.GetId() == targetType.GetId() {
-		return existing, nil, true, nil
+		return nil, true, nil
 	}
 
 	targetName = targetType.GetMetadata().GetName()
 	warnings, err = validateResolvedInstanceType(targetType, targetName, "")
 	if err != nil {
-		return nil, nil, false, err
+		return nil, false, err
 	}
 	if !proto.Equal(
 		currentType.GetSpec().GetGpu(),
 		targetType.GetSpec().GetGpu(),
 	) {
-		return nil, nil, false, grpcstatus.Errorf(
+		return nil, false, grpcstatus.Errorf(
 			grpccodes.FailedPrecondition,
 			"cannot change GPU configuration when resizing from instance type '%s' to '%s'",
 			currentType.GetMetadata().GetName(),
@@ -675,7 +668,7 @@ func (s *PrivateComputeInstancesServer) validateInstanceTypeResize(
 		)
 	}
 
-	return existing, warnings, false, nil
+	return warnings, false, nil
 }
 
 // validateDiskImage checks the image selected by the caller, Catalog policy, or Template and
