@@ -188,44 +188,6 @@ def _next_restart_timestamp(last_restarted_at: str) -> str:
     return timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _restart_after_resize(
-    grpc: GRPCClient,
-    k8s_hub: K8sClient,
-    k8s_virt: K8sClient,
-    *,
-    ci_uuid: str,
-    ci_name: str,
-    vmi_namespace: str,
-    vm_template: str,
-    initial_vmi_timestamp: str,
-) -> None:
-    previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
-    restart_timestamp = _next_restart_timestamp(previous_last_restarted)
-    grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
-    wait_for_restart(
-        k8s=k8s_hub,
-        name=ci_name,
-        initial=previous_last_restarted,
-        restart_ts=restart_timestamp,
-    )
-    wait_for_running(k8s=k8s_hub, name=ci_name)
-    wait_for_new_vmi(
-        k8s=k8s_virt,
-        vmi_namespace=vmi_namespace,
-        compute_instance_name=ci_name,
-        initial_timestamp=initial_vmi_timestamp,
-    )
-    poll_until(
-        fn=lambda: k8s_hub.get_compute_instance_condition_status(
-            name=ci_name, condition_type="RestartRequired", checked=False
-        ),
-        until=lambda status: status in ("", "False"),
-        retries=60,
-        delay=5,
-        description=f"{ci_name} RestartRequired cleared after manual resize restart",
-    )
-
-
 def _resize_and_restart_compute_instance(
     grpc: GRPCClient,
     k8s_hub: K8sClient,
@@ -260,15 +222,30 @@ def _resize_and_restart_compute_instance(
     _wait_for_vmi_resources(
         k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=current_vcpus, memory_gib=current_memory_gib
     )
-    _restart_after_resize(
-        grpc,
-        k8s_hub,
-        k8s_virt,
-        ci_uuid=ci_uuid,
-        ci_name=ci_name,
+    previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
+    restart_timestamp = _next_restart_timestamp(previous_last_restarted)
+    grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
+    wait_for_restart(
+        k8s=k8s_hub,
+        name=ci_name,
+        initial=previous_last_restarted,
+        restart_ts=restart_timestamp,
+    )
+    wait_for_running(k8s=k8s_hub, name=ci_name)
+    wait_for_new_vmi(
+        k8s=k8s_virt,
         vmi_namespace=vmi_namespace,
-        vm_template=vm_template,
-        initial_vmi_timestamp=initial_vmi_timestamp,
+        compute_instance_name=ci_name,
+        initial_timestamp=initial_vmi_timestamp,
+    )
+    poll_until(
+        fn=lambda: k8s_hub.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status in ("", "False"),
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired cleared after manual resize restart",
     )
     _wait_for_vmi_resources(
         k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=target_vcpus, memory_gib=target_memory_gib
