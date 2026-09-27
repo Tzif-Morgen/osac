@@ -670,3 +670,115 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
             description=f"{ci_name} RestartRequired cleared after manual restart",
         )
         current_key = target_key
+
+
+def test_compute_instance_resize_from_catalog_item(
+    grpc: GRPCClient,
+    k8s_hub_client: K8sClient,
+    k8s_virt_client: K8sClient,
+    vm_template: str,
+    default_subnet: str,
+    default_storage_tier: str,
+    default_disk_image: str,
+    resize_instance_types: dict[str, str],
+) -> None:
+    """Verify a CatalogItem with an editable instance type can provision and resize a VM."""
+    fields = {
+        "boot_disk": {
+            "storage_tier": {"editable": {"default_value": {"name": default_storage_tier}}},
+            "size_gib": {"editable": {}},
+        },
+        "network_attachments": {"editable": {}},
+        "disk_image": {"editable": {}},
+        "instance_type": {"editable": {}},
+        "run_strategy": {"editable": {}},
+    }
+    catalog_item_id = grpc.create_compute_instance_catalog_item(
+        name=unique_name("e2e-resize-catalog"), template=vm_template, published=True, fields=fields
+    )
+    ci_uuid: str | None = None
+    ci_name: str | None = None
+
+    try:
+        catalog_item = grpc.get_compute_instance_catalog_item(catalog_item_id=catalog_item_id)["object"]
+        assert catalog_item["fields"]["instanceType"]["editable"] == {}
+
+        response = grpc.call(
+            service="osac.public.v1.ComputeInstances/Create",
+            data={
+                "object": {
+                    "metadata": {"name": unique_name("e2e-resize-from-catalog")},
+                    "spec": {
+                        "catalog_item": {"id": catalog_item_id},
+                        "instance_type": {"name": resize_instance_types["small"]},
+                        "boot_disk": {"size_gib": 20, "storage_tier": {"name": default_storage_tier}},
+                        "network_attachments": [{"subnet": {"id": default_subnet}}],
+                        "disk_image": {"name": default_disk_image},
+                        "run_strategy": "Always",
+                    },
+                }
+            },
+        )
+        ci_uuid = response["object"]["id"]
+        ci_name = wait_for_cr(k8s=k8s_hub_client, uuid=ci_uuid)
+        wait_for_provision(k8s=k8s_hub_client, name=ci_name)
+        wait_for_running(k8s=k8s_hub_client, name=ci_name)
+        current = _wait_for_configuration_applied(k8s_hub_client, name=ci_name, vcpus=2, memory_gib=4)
+        vm_namespace = k8s_hub_client.get_compute_instance_vm_namespace(name=ci_name)
+        _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=2, memory_gib=4)
+        previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
+            vmi_namespace=vm_namespace, compute_instance_name=ci_name
+        )
+        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["small"]
+
+        original_version = current.get("status", {}).get("desiredConfigVersion", "")
+        update_response = grpc.update_compute_instance_instance_type(
+            ci_id=ci_uuid, instance_type=resize_instance_types["medium"]
+        )
+
+        assert update_response.get("warnings", []) == []
+        assert _instance_type_name(update_response) == resize_instance_types["medium"]
+        updated = _wait_for_configuration_applied(
+            k8s_hub_client, name=ci_name, vcpus=4, memory_gib=8, previous_config_version=original_version
+        )
+        assert updated["status"]["desiredConfigVersion"] != original_version
+        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["medium"]
+
+        if _condition_status(updated, "RestartRequired") == "True":
+            previous_last_restarted = k8s_hub_client.get_compute_instance_last_restarted_at(name=ci_name)
+            restart_timestamp = _next_restart_timestamp(previous_last_restarted)
+            grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
+            wait_for_restart(
+                k8s=k8s_hub_client, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp
+            )
+            wait_for_running(k8s=k8s_hub_client, name=ci_name)
+            poll_until(
+                fn=lambda: k8s_virt_client.get_vmi_creation_timestamp(
+                    vmi_namespace=vm_namespace, compute_instance_name=ci_name
+                ),
+                until=lambda timestamp, original_timestamp=previous_vmi_timestamp: (
+                    timestamp != "" and timestamp != original_timestamp
+                ),
+                retries=60,
+                delay=5,
+                description=f"{ci_name} VMI recreated after CatalogItem resize restart",
+            )
+            poll_until(
+                fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
+                    name=ci_name, condition_type="RestartRequired", checked=False
+                ),
+                until=lambda status: status in ("", "False"),
+                retries=60,
+                delay=5,
+                description=f"{ci_name} RestartRequired cleared after CatalogItem resize restart",
+            )
+
+        _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=4, memory_gib=8)
+    finally:
+        try:
+            if ci_uuid is not None:
+                grpc.delete_compute_instance(ci_id=ci_uuid)
+                if ci_name is not None:
+                    wait_for_deletion(k8s=k8s_hub_client, name=ci_name)
+        finally:
+            grpc.delete_compute_instance_catalog_item(catalog_item_id=catalog_item_id)

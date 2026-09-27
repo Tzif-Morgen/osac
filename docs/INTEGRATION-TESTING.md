@@ -291,3 +291,26 @@ There is no component-level suite that runs the full fulfillment Watch → Kafka
 → CloudEvents pipeline. Changes to that path must not claim integration
 coverage from mock-based tests; add or extend the real-Kafka coverage under
 [OSAC-4846](https://redhat.atlassian.net/browse/OSAC-4846).
+
+## tests/e2e
+
+Touched-area requirements: [component guide](../tests/e2e/AGENTS.md#touched-area-map).
+
+### Test tiers and commands
+
+| Tier | Location / command | Exercises for real | Faked or omitted |
+|---|---|---|---|
+| Unit | `tests/unit/test_grpc_client.py`; from the repository root, run `uv run pytest tests/unit/test_grpc_client.py` | The resize helper's public gRPC service name, payload, update mask, and response handling | `GRPCClient.call` is stubbed; no deployed API or reconciliation is exercised. |
+| E2E (VMaaS regression) | `tests/e2e/vmaas/regression/test_compute_instance_instance_type.py`; from the repository root, run `uv run pytest tests/e2e/vmaas/regression/test_compute_instance_instance_type.py` | The deployed VMaaS API and Kubernetes path, including ComputeInstance configuration, conditions, CatalogItem provisioning, and VMI resources | No services are mocked. The suite requires the configured VMaaS environment and provider path. Multi-node live hot-plug is omitted; see [OSAC-5335](https://redhat.atlassian.net/browse/OSAC-5335). |
+
+### Coverage notes
+
+- **ComputeInstance InstanceType changes:** Run the VMaaS regression suite against the deployed profile. It needs the gRPC endpoints, VM kubeconfig, image, storage tier, subnet, and VM template; restart-required cases use the single-node profile.
+- **Resize helper request shape:** The unit test verifies the public `ComputeInstances/Update` call contract but does not replace deployed E2E coverage.
+- **Markers:** All resize scenarios belong to the regression tier, not sanity.
+
+### Coverage gaps
+
+The resize story covers the single-node restart-required lifecycle. Multi-node
+live hot-plug and related provider coverage remain with
+[OSAC-5335](https://redhat.atlassian.net/browse/OSAC-5335).
