@@ -12,6 +12,7 @@ import pytest
 from tests.e2e.core.grpc_client import GRPCClient
 from tests.e2e.core.helpers import (
     assert_grpc_rejected,
+    delete_instance_type_if_present,
     unique_name,
     wait_for_cr,
     wait_for_deletion,
@@ -67,12 +68,7 @@ def active_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
         name=it_name, vcpus=IT_VCPUS, memory_gib=IT_MEMORY_GIB, description="E2E compute instance test type"
     )
     yield it_name
-    try:
-        private_grpc.delete_instance_type(name=it_name)
-    except subprocess.CalledProcessError as e:
-        output = ((e.stdout or "") + (e.stderr or "")).lower()
-        if "not found" not in output:
-            raise
+    delete_instance_type_if_present(grpc=private_grpc, name=it_name)
 
 
 @pytest.fixture
@@ -85,12 +81,7 @@ def resize_instance_types(private_grpc: GRPCClient, active_instance_type: str) -
     try:
         yield {"small": active_instance_type, "medium": medium_name}
     finally:
-        try:
-            private_grpc.delete_instance_type(name=medium_name)
-        except subprocess.CalledProcessError as e:
-            output = ((e.stdout or "") + (e.stderr or "")).lower()
-            if "not found" not in output:
-                raise
+        delete_instance_type_if_present(grpc=private_grpc, name=medium_name)
 
 
 def _condition_status(compute_instance: dict[str, Any], condition_type: str) -> str:
@@ -165,12 +156,14 @@ def _vmi_has_resources(vmi: dict[str, Any], *, vcpus: int, memory_gib: int) -> b
     )
 
 
-def _wait_for_vmi_resources(
-    k8s: K8sClient, *, vmi_namespace: str, ci_name: str, vcpus: int, memory_gib: int
-) -> dict[str, Any]:
-    return poll_until(
-        fn=lambda: k8s.get_vmi_json(vmi_namespace=vmi_namespace, compute_instance_name=ci_name, checked=False),
-        until=lambda vmi: bool(vmi) and _vmi_has_resources(vmi, vcpus=vcpus, memory_gib=memory_gib),
+def _wait_for_vmi_resources(k8s: K8sClient, *, vmi_namespace: str, ci_name: str, vcpus: int, memory_gib: int) -> None:
+    poll_until(
+        fn=lambda: _vmi_has_resources(
+            k8s.get_vmi_json(vmi_namespace=vmi_namespace, compute_instance_name=ci_name, checked=False),
+            vcpus=vcpus,
+            memory_gib=memory_gib,
+        ),
+        until=lambda matches: matches,
         retries=60,
         delay=5,
         description=f"{ci_name} VMI with {vcpus} sockets and {memory_gib} GiB",
@@ -580,12 +573,7 @@ def test_compute_instance_resize_rejects_different_gpu_spec(
             grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=gpu_type
         )
     finally:
-        try:
-            private_grpc.delete_instance_type(name=gpu_type)
-        except subprocess.CalledProcessError as e:
-            output = ((e.stdout or "") + (e.stderr or "")).lower()
-            if "not found" not in output:
-                raise
+        delete_instance_type_if_present(grpc=private_grpc, name=gpu_type)
 
 
 def test_compute_instance_resize_while_stopped_applies_on_start(

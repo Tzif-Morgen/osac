@@ -155,6 +155,15 @@ def wait_for_grpc_removal(*, grpc: GRPCClient, uuid: str) -> None:
     )
 
 
+def delete_instance_type_if_present(*, grpc: GRPCClient, name: str) -> None:
+    try:
+        grpc.delete_instance_type(name=name)
+    except subprocess.CalledProcessError as exc:
+        output = ((exc.stdout or "") + (exc.stderr or "")).lower()
+        if "not found" not in output:
+            raise
+
+
 def wait_for_virtual_network_cr(*, k8s: K8sClient, uuid: str) -> str:
     return poll_until(
         fn=lambda: k8s.get_virtual_network_name(uuid=uuid, checked=False),
