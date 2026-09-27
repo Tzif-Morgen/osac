@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from unittest.mock import Mock
 
+import pytest
+
 from tests.e2e.core import helpers
 from tests.e2e.core.k8s_client import K8sClient
 
