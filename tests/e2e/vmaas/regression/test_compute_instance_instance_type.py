@@ -15,6 +15,7 @@ from tests.e2e.core.helpers import (
     unique_name,
     wait_for_cr,
     wait_for_deletion,
+    wait_for_new_vmi,
     wait_for_provision,
     wait_for_restart,
     wait_for_running,
@@ -27,7 +28,7 @@ pytestmark = pytest.mark.regression
 
 IT_VCPUS: int = 2
 IT_MEMORY_GIB: int = 4
-RESIZE_TYPE_RESOURCES: dict[str, tuple[int, int]] = {"small": (2, 4), "medium": (4, 8)}
+RESIZE_TYPE_RESOURCES: dict[str, tuple[int, int]] = {"small": (IT_VCPUS, IT_MEMORY_GIB), "medium": (4, 8)}
 
 
 def _build_create_ci_args(
@@ -75,25 +76,21 @@ def active_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
 
 
 @pytest.fixture
-def resize_instance_types(private_grpc: GRPCClient) -> Iterator[dict[str, str]]:
-    names = {key: f"e2e-resize-{key}-{uuid4().hex[:8]}" for key in RESIZE_TYPE_RESOURCES}
-    created: list[str] = []
+def resize_instance_types(private_grpc: GRPCClient, active_instance_type: str) -> Iterator[dict[str, str]]:
+    medium_name = f"e2e-resize-medium-{uuid4().hex[:8]}"
+    medium_vcpus, medium_memory_gib = RESIZE_TYPE_RESOURCES["medium"]
+    private_grpc.create_instance_type(
+        name=medium_name, vcpus=medium_vcpus, memory_gib=medium_memory_gib, description="E2E VM resize test type"
+    )
     try:
-        for key, (vcpus, memory_gib) in RESIZE_TYPE_RESOURCES.items():
-            name = names[key]
-            private_grpc.create_instance_type(
-                name=name, vcpus=vcpus, memory_gib=memory_gib, description="E2E VM resize test type"
-            )
-            created.append(name)
-        yield names
+        yield {"small": active_instance_type, "medium": medium_name}
     finally:
-        for name in reversed(created):
-            try:
-                private_grpc.delete_instance_type(name=name)
-            except subprocess.CalledProcessError as e:
-                output = ((e.stdout or "") + (e.stderr or "")).lower()
-                if "not found" not in output:
-                    raise
+        try:
+            private_grpc.delete_instance_type(name=medium_name)
+        except subprocess.CalledProcessError as e:
+            output = ((e.stdout or "") + (e.stderr or "")).lower()
+            if "not found" not in output:
+                raise
 
 
 def _condition_status(compute_instance: dict[str, Any], condition_type: str) -> str:
@@ -170,6 +167,39 @@ def _next_restart_timestamp(last_restarted_at: str) -> str:
         if timestamp <= previous:
             timestamp = previous + timedelta(seconds=1)
     return timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _restart_after_resize(
+    grpc: GRPCClient,
+    k8s_hub: K8sClient,
+    k8s_virt: K8sClient,
+    *,
+    ci_uuid: str,
+    ci_name: str,
+    vmi_namespace: str,
+    vm_template: str,
+    initial_vmi_timestamp: str,
+) -> None:
+    previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
+    restart_timestamp = _next_restart_timestamp(previous_last_restarted)
+    grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
+    wait_for_restart(k8s=k8s_hub, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp)
+    wait_for_running(k8s=k8s_hub, name=ci_name)
+    wait_for_new_vmi(
+        k8s=k8s_virt,
+        vmi_namespace=vmi_namespace,
+        compute_instance_name=ci_name,
+        initial_timestamp=initial_vmi_timestamp,
+    )
+    poll_until(
+        fn=lambda: k8s_hub.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status in ("", "False"),
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired cleared after manual resize restart",
+    )
 
 
 @pytest.fixture
@@ -636,38 +666,21 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
         _wait_for_vmi_resources(
             k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=current_vcpus, memory_gib=current_memory
         )
-        previous_last_restarted = k8s_hub_client.get_compute_instance_last_restarted_at(name=ci_name)
         previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
             vmi_namespace=vm_namespace, compute_instance_name=ci_name
         )
-        restart_timestamp = _next_restart_timestamp(previous_last_restarted)
-        grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
-        wait_for_restart(
-            k8s=k8s_hub_client, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp
-        )
-        wait_for_running(k8s=k8s_hub_client, name=ci_name)
-        poll_until(
-            fn=lambda: k8s_virt_client.get_vmi_creation_timestamp(
-                vmi_namespace=vm_namespace, compute_instance_name=ci_name
-            ),
-            until=lambda timestamp, original_timestamp=previous_vmi_timestamp: (
-                timestamp != "" and timestamp != original_timestamp
-            ),
-            retries=60,
-            delay=5,
-            description=f"{ci_name} VMI recreated after resize restart",
+        _restart_after_resize(
+            grpc,
+            k8s_hub_client,
+            k8s_virt_client,
+            ci_uuid=ci_uuid,
+            ci_name=ci_name,
+            vmi_namespace=vm_namespace,
+            vm_template=vm_template,
+            initial_vmi_timestamp=previous_vmi_timestamp,
         )
         _wait_for_vmi_resources(
             k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=target_vcpus, memory_gib=target_memory
-        )
-        poll_until(
-            fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
-                name=ci_name, condition_type="RestartRequired", checked=False
-            ),
-            until=lambda status: status in ("", "False"),
-            retries=60,
-            delay=5,
-            description=f"{ci_name} RestartRequired cleared after manual restart",
         )
         current_key = target_key
 
@@ -745,32 +758,15 @@ def test_compute_instance_resize_from_catalog_item(
         assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["medium"]
 
         if _condition_status(updated, "RestartRequired") == "True":
-            previous_last_restarted = k8s_hub_client.get_compute_instance_last_restarted_at(name=ci_name)
-            restart_timestamp = _next_restart_timestamp(previous_last_restarted)
-            grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
-            wait_for_restart(
-                k8s=k8s_hub_client, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp
-            )
-            wait_for_running(k8s=k8s_hub_client, name=ci_name)
-            poll_until(
-                fn=lambda: k8s_virt_client.get_vmi_creation_timestamp(
-                    vmi_namespace=vm_namespace, compute_instance_name=ci_name
-                ),
-                until=lambda timestamp, original_timestamp=previous_vmi_timestamp: (
-                    timestamp != "" and timestamp != original_timestamp
-                ),
-                retries=60,
-                delay=5,
-                description=f"{ci_name} VMI recreated after CatalogItem resize restart",
-            )
-            poll_until(
-                fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
-                    name=ci_name, condition_type="RestartRequired", checked=False
-                ),
-                until=lambda status: status in ("", "False"),
-                retries=60,
-                delay=5,
-                description=f"{ci_name} RestartRequired cleared after CatalogItem resize restart",
+            _restart_after_resize(
+                grpc,
+                k8s_hub_client,
+                k8s_virt_client,
+                ci_uuid=ci_uuid,
+                ci_name=ci_name,
+                vmi_namespace=vm_namespace,
+                vm_template=vm_template,
+                initial_vmi_timestamp=previous_vmi_timestamp,
             )
 
         _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=4, memory_gib=8)

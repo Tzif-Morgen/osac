@@ -10,26 +10,15 @@ from tests.e2e.core.helpers import (
     wait_for_cr,
     wait_for_deletion,
     wait_for_grpc_removal,
+    wait_for_new_vmi,
     wait_for_restart,
     wait_for_running,
 )
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.metering import MeteringCollector
 from tests.e2e.core.osac_cli import OsacCLI
-from tests.e2e.core.runner import poll_until
 
 pytestmark = pytest.mark.regression
-
-
-def _wait_for_new_vmi(k8s_virt: K8sClient, *, vmi_namespace: str, ci_name: str, original_ts: str) -> str:
-    poll_until(
-        fn=lambda: k8s_virt.get_vmi_creation_timestamp(vmi_namespace=vmi_namespace, compute_instance_name=ci_name),
-        until=lambda v: v != original_ts,
-        retries=30,
-        delay=10,
-        description=f"new VMI for {ci_name}",
-    )
-    return k8s_virt.get_vmi_creation_timestamp(vmi_namespace=vmi_namespace, compute_instance_name=ci_name)
 
 
 @pytest.mark.metering
@@ -74,8 +63,8 @@ def test_compute_instance_restart(
         assert final_last_restarted != initial_last_restarted
         assert final_last_restarted >= restart_ts
 
-        new_vmi_ts: str = _wait_for_new_vmi(
-            k8s_virt_client, vmi_namespace=vmi_ns, ci_name=ci_name, original_ts=original_vmi_ts
+        new_vmi_ts: str = wait_for_new_vmi(
+            k8s=k8s_virt_client, vmi_namespace=vmi_ns, compute_instance_name=ci_name, initial_timestamp=original_vmi_ts
         )
         assert new_vmi_ts > original_vmi_ts
 
