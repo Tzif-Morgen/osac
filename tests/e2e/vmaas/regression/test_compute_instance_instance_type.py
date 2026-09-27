@@ -426,48 +426,41 @@ def test_compute_instance_obsolete_instance_type(
     )
 
 
-def test_compute_instance_resize_up(
+@pytest.mark.parametrize(
+    ("source_type", "target_type", "target_vcpus", "target_memory_gib"),
+    (("small", "medium", 4, 8), ("medium", "small", 2, 4)),
+    ids=("up", "down"),
+)
+def test_compute_instance_resize(
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     resize_instance_types: dict[str, str],
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
+    source_type: str,
+    target_type: str,
+    target_vcpus: int,
+    target_memory_gib: int,
 ) -> None:
-    ci_uuid, ci_name = running_compute_instance_factory("small")
+    ci_uuid, ci_name = running_compute_instance_factory(source_type)
     original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_version = original.get("status", {}).get("desiredConfigVersion", "")
 
-    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=resize_instance_types["medium"])
+    response = grpc.update_compute_instance_instance_type(
+        ci_id=ci_uuid, instance_type=resize_instance_types[target_type]
+    )
 
     assert response.get("warnings", []) == []
-    assert _instance_type_name(response) == resize_instance_types["medium"]
+    assert _instance_type_name(response) == resize_instance_types[target_type]
     updated = _wait_for_configuration_applied(
-        k8s_hub_client, name=ci_name, vcpus=4, memory_gib=8, previous_config_version=original_version
+        k8s_hub_client,
+        name=ci_name,
+        vcpus=target_vcpus,
+        memory_gib=target_memory_gib,
+        previous_config_version=original_version,
     )
     assert updated["status"]["desiredConfigVersion"] != original_version
-    assert updated["spec"]["vcpus"] == 4
-    assert updated["spec"]["memoryGiB"] == 8
-
-
-def test_compute_instance_resize_down(
-    grpc: GRPCClient,
-    k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
-    running_compute_instance_factory: Callable[[str], tuple[str, str]],
-) -> None:
-    ci_uuid, ci_name = running_compute_instance_factory("medium")
-    original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
-    original_version = original.get("status", {}).get("desiredConfigVersion", "")
-
-    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=resize_instance_types["small"])
-
-    assert response.get("warnings", []) == []
-    assert _instance_type_name(response) == resize_instance_types["small"]
-    updated = _wait_for_configuration_applied(
-        k8s_hub_client, name=ci_name, vcpus=2, memory_gib=4, previous_config_version=original_version
-    )
-    assert updated["status"]["desiredConfigVersion"] != original_version
-    assert updated["spec"]["vcpus"] == 2
-    assert updated["spec"]["memoryGiB"] == 4
+    assert updated["spec"]["vcpus"] == target_vcpus
+    assert updated["spec"]["memoryGiB"] == target_memory_gib
 
 
 def test_compute_instance_resize_to_deprecated_type_returns_warning(
