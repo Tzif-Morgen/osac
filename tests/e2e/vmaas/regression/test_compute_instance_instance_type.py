@@ -16,14 +16,13 @@ from tests.e2e.core.helpers import (
     unique_name,
     wait_for_cr,
     wait_for_deletion,
-    wait_for_new_vmi,
     wait_for_provision,
-    wait_for_restart,
     wait_for_running,
 )
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import poll_until, run_unchecked
+from tests.e2e.vmaas.regression.helpers import restart_compute_instance_and_wait_for_vmi
 
 pytestmark = pytest.mark.regression
 
@@ -192,14 +191,17 @@ def _restart_after_resize(
 ) -> None:
     previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
     restart_timestamp = _next_restart_timestamp(previous_last_restarted)
-    grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
-    wait_for_restart(k8s=k8s_hub, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp)
-    wait_for_running(k8s=k8s_hub, name=ci_name)
-    wait_for_new_vmi(
-        k8s=k8s_virt,
+    restart_compute_instance_and_wait_for_vmi(
+        grpc,
+        k8s_hub,
+        k8s_virt,
+        uuid=ci_uuid,
+        name=ci_name,
         vmi_namespace=vmi_namespace,
-        compute_instance_name=ci_name,
-        initial_timestamp=initial_vmi_timestamp,
+        vm_template=vm_template,
+        restart_timestamp=restart_timestamp,
+        initial_last_restarted_at=previous_last_restarted,
+        initial_vmi_timestamp=initial_vmi_timestamp,
     )
     poll_until(
         fn=lambda: k8s_hub.get_compute_instance_condition_status(
@@ -209,6 +211,55 @@ def _restart_after_resize(
         retries=60,
         delay=5,
         description=f"{ci_name} RestartRequired cleared after manual resize restart",
+    )
+
+
+def _resize_and_restart_compute_instance(
+    grpc: GRPCClient,
+    k8s_hub: K8sClient,
+    k8s_virt: K8sClient,
+    *,
+    ci_uuid: str,
+    ci_name: str,
+    vmi_namespace: str,
+    vm_template: str,
+    target_instance_type: str,
+    current_vcpus: int,
+    current_memory_gib: int,
+    target_vcpus: int,
+    target_memory_gib: int,
+    previous_config_version: str,
+    initial_vmi_timestamp: str,
+) -> None:
+    update_response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target_instance_type)
+    assert update_response.get("warnings", []) == []
+    assert _instance_type_name(update_response) == target_instance_type
+
+    updated = _wait_for_configuration_applied(
+        k8s_hub,
+        name=ci_name,
+        vcpus=target_vcpus,
+        memory_gib=target_memory_gib,
+        previous_config_version=previous_config_version,
+    )
+    assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == target_instance_type
+    assert _condition_status(updated, "RestartRequired") == "True"
+
+    _wait_for_vmi_resources(
+        k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=current_vcpus, memory_gib=current_memory_gib
+    )
+    _restart_after_resize(
+        grpc,
+        k8s_hub,
+        k8s_virt,
+        ci_uuid=ci_uuid,
+        ci_name=ci_name,
+        vmi_namespace=vmi_namespace,
+        vm_template=vm_template,
+        initial_vmi_timestamp=initial_vmi_timestamp,
+    )
+    _wait_for_vmi_resources(
+        k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=target_vcpus, memory_gib=target_memory_gib
     )
 
 
@@ -461,16 +512,13 @@ def test_compute_instance_resize(
 
     assert response.get("warnings", []) == []
     assert _instance_type_name(response) == resize_instance_types[target_type]
-    updated = _wait_for_configuration_applied(
+    _wait_for_configuration_applied(
         k8s_hub_client,
         name=ci_name,
         vcpus=target_vcpus,
         memory_gib=target_memory_gib,
         previous_config_version=original_version,
     )
-    assert updated["status"]["desiredConfigVersion"] != original_version
-    assert updated["spec"]["vcpus"] == target_vcpus
-    assert updated["spec"]["memoryGiB"] == target_memory_gib
 
 
 def test_compute_instance_resize_to_deprecated_type_returns_warning(
@@ -508,11 +556,9 @@ def test_compute_instance_resize_to_deprecated_type_returns_warning(
     assert resize_instance_types["small"] in warnings[0]
     assert "2030-01-01" in warnings[0]
     assert _instance_type_name(response) == target
-    updated = _wait_for_configuration_applied(
+    _wait_for_configuration_applied(
         k8s_hub_client, name=ci_name, vcpus=4, memory_gib=8, previous_config_version=original_version
     )
-    assert updated["spec"]["vcpus"] == 4
-    assert updated["spec"]["memoryGiB"] == 8
 
 
 def test_compute_instance_resize_to_obsolete_type_is_rejected(
@@ -630,27 +676,10 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
         target_vcpus, target_memory = RESIZE_TYPE_RESOURCES[target_key]
         original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
         original_version = original.get("status", {}).get("desiredConfigVersion", "")
-        response = grpc.update_compute_instance_instance_type(
-            ci_id=ci_uuid, instance_type=resize_instance_types[target_key]
-        )
-        assert response.get("warnings", []) == []
-        updated = _wait_for_configuration_applied(
-            k8s_hub_client,
-            name=ci_name,
-            vcpus=target_vcpus,
-            memory_gib=target_memory,
-            previous_config_version=original_version,
-        )
-        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types[target_key]
-        assert _condition_status(updated, "RestartRequired") == "True"
-
-        _wait_for_vmi_resources(
-            k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=current_vcpus, memory_gib=current_memory
-        )
         previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
             vmi_namespace=vm_namespace, compute_instance_name=ci_name
         )
-        _restart_after_resize(
+        _resize_and_restart_compute_instance(
             grpc,
             k8s_hub_client,
             k8s_virt_client,
@@ -658,10 +687,13 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
             ci_name=ci_name,
             vmi_namespace=vm_namespace,
             vm_template=vm_template,
+            target_instance_type=resize_instance_types[target_key],
+            current_vcpus=current_vcpus,
+            current_memory_gib=current_memory,
+            target_vcpus=target_vcpus,
+            target_memory_gib=target_memory,
+            previous_config_version=original_version,
             initial_vmi_timestamp=previous_vmi_timestamp,
-        )
-        _wait_for_vmi_resources(
-            k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=target_vcpus, memory_gib=target_memory
         )
         current_key = target_key
 
@@ -726,20 +758,7 @@ def test_compute_instance_resize_from_catalog_item(
         assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["small"]
 
         original_version = current.get("status", {}).get("desiredConfigVersion", "")
-        update_response = grpc.update_compute_instance_instance_type(
-            ci_id=ci_uuid, instance_type=resize_instance_types["medium"]
-        )
-
-        assert update_response.get("warnings", []) == []
-        assert _instance_type_name(update_response) == resize_instance_types["medium"]
-        updated = _wait_for_configuration_applied(
-            k8s_hub_client, name=ci_name, vcpus=4, memory_gib=8, previous_config_version=original_version
-        )
-        assert updated["status"]["desiredConfigVersion"] != original_version
-        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["medium"]
-
-        assert _condition_status(updated, "RestartRequired") == "True"
-        _restart_after_resize(
+        _resize_and_restart_compute_instance(
             grpc,
             k8s_hub_client,
             k8s_virt_client,
@@ -747,10 +766,14 @@ def test_compute_instance_resize_from_catalog_item(
             ci_name=ci_name,
             vmi_namespace=vm_namespace,
             vm_template=vm_template,
+            target_instance_type=resize_instance_types["medium"],
+            current_vcpus=2,
+            current_memory_gib=4,
+            target_vcpus=4,
+            target_memory_gib=8,
+            previous_config_version=original_version,
             initial_vmi_timestamp=previous_vmi_timestamp,
         )
-
-        _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=4, memory_gib=8)
     finally:
         try:
             if ci_uuid is not None:

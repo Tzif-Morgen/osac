@@ -10,13 +10,12 @@ from tests.e2e.core.helpers import (
     wait_for_cr,
     wait_for_deletion,
     wait_for_grpc_removal,
-    wait_for_new_vmi,
-    wait_for_restart,
     wait_for_running,
 )
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.metering import MeteringCollector
 from tests.e2e.core.osac_cli import OsacCLI
+from tests.e2e.vmaas.regression.helpers import restart_compute_instance_and_wait_for_vmi
 
 pytestmark = pytest.mark.regression
 
@@ -51,21 +50,27 @@ def test_compute_instance_restart(
         initial_last_restarted: str = k8s_hub_client.get_compute_instance_last_restarted_at(name=ci_name)
 
         restart_ts: str = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        grpc.update_restart(uuid=uuid, template=vm_template, timestamp=restart_ts)
+        new_vmi_ts: str = restart_compute_instance_and_wait_for_vmi(
+            grpc,
+            k8s_hub_client,
+            k8s_virt_client,
+            uuid=uuid,
+            name=ci_name,
+            vmi_namespace=vmi_ns,
+            vm_template=vm_template,
+            restart_timestamp=restart_ts,
+            initial_last_restarted_at=initial_last_restarted,
+            initial_vmi_timestamp=original_vmi_ts,
+        )
 
         metering.expect("osac.resource.suspended.v1", resource_id=uuid)
         metering.expect("osac.resource.resumed.v1", resource_id=uuid)
-
-        wait_for_restart(k8s=k8s_hub_client, name=ci_name, initial=initial_last_restarted, restart_ts=restart_ts)
 
         final_last_restarted: str = k8s_hub_client.get_compute_instance_last_restarted_at(name=ci_name)
         assert final_last_restarted != ""
         assert final_last_restarted != initial_last_restarted
         assert final_last_restarted >= restart_ts
 
-        new_vmi_ts: str = wait_for_new_vmi(
-            k8s=k8s_virt_client, vmi_namespace=vmi_ns, compute_instance_name=ci_name, initial_timestamp=original_vmi_ts
-        )
         assert new_vmi_ts > original_vmi_ts
 
         restart_failed: str = k8s_hub_client.get_jsonpath(
