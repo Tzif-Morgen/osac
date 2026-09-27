@@ -509,6 +509,7 @@ def test_compute_instance_obsolete_instance_type(
     )
 
 
+@pytest.mark.usefixtures("compute_instance_type_editor")
 @pytest.mark.parametrize(
     ("source_type", "target_type", "target_vcpus", "target_memory_gib"),
     (("small", "medium", 4, 8), ("medium", "small", 2, 4)),
@@ -520,7 +521,6 @@ def test_compute_instance_resize_via_cli(
     k8s_hub_client: K8sClient,
     resize_instance_types: dict[str, str],
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
-    compute_instance_type_editor: None,
     monkeypatch: pytest.MonkeyPatch,
     source_type: str,
     target_type: str,
