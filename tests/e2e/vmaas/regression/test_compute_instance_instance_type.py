@@ -757,17 +757,17 @@ def test_compute_instance_resize_from_catalog_item(
         assert updated["status"]["desiredConfigVersion"] != original_version
         assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["medium"]
 
-        if _condition_status(updated, "RestartRequired") == "True":
-            _restart_after_resize(
-                grpc,
-                k8s_hub_client,
-                k8s_virt_client,
-                ci_uuid=ci_uuid,
-                ci_name=ci_name,
-                vmi_namespace=vm_namespace,
-                vm_template=vm_template,
-                initial_vmi_timestamp=previous_vmi_timestamp,
-            )
+        assert _condition_status(updated, "RestartRequired") == "True"
+        _restart_after_resize(
+            grpc,
+            k8s_hub_client,
+            k8s_virt_client,
+            ci_uuid=ci_uuid,
+            ci_name=ci_name,
+            vmi_namespace=vm_namespace,
+            vm_template=vm_template,
+            initial_vmi_timestamp=previous_vmi_timestamp,
+        )
 
         _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=4, memory_gib=8)
     finally:
