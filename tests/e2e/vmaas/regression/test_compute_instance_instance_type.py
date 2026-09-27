@@ -136,6 +136,23 @@ def _configuration_snapshot(compute_instance: dict[str, Any]) -> tuple[Any, ...]
     return (compute_instance.get("metadata", {}).get("generation"), status.get("desiredConfigVersion", ""), job_ids)
 
 
+def _assert_resize_rejected_without_changes(
+    grpc: GRPCClient, k8s_hub_client: K8sClient, *, ci_uuid: str, ci_name: str, target_instance_type: str
+) -> None:
+    original_api = grpc.get_compute_instance(ci_id=ci_uuid)
+    original_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
+    original_snapshot = _configuration_snapshot(original_cr)
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target_instance_type)
+
+    assert_grpc_rejected(exc_info, "FailedPrecondition")
+    assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == _instance_type_name(original_api)
+    assert _configuration_snapshot(k8s_hub_client.get_json(resource="computeinstance", name=ci_name)) == (
+        original_snapshot
+    )
+
+
 def _vmi_has_resources(vmi: dict[str, Any], *, vcpus: int, memory_gib: int) -> bool:
     domain = vmi.get("spec", {}).get("domain", {})
     cpu = domain.get("cpu", {})
@@ -515,17 +532,8 @@ def test_compute_instance_resize_to_obsolete_type_is_rejected(
     ci_uuid, ci_name = running_compute_instance_factory("small")
     target = resize_instance_types["medium"]
     private_grpc.update_instance_type(name=target, state="INSTANCE_TYPE_STATE_OBSOLETE")
-    original_api = grpc.get_compute_instance(ci_id=ci_uuid)
-    original_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
-    original_snapshot = _configuration_snapshot(original_cr)
-
-    with pytest.raises(subprocess.CalledProcessError) as exc_info:
-        grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target)
-
-    assert_grpc_rejected(exc_info, "FailedPrecondition")
-    assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == _instance_type_name(original_api)
-    assert (
-        _configuration_snapshot(k8s_hub_client.get_json(resource="computeinstance", name=ci_name)) == original_snapshot
+    _assert_resize_rejected_without_changes(
+        grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=target
     )
 
 
@@ -568,16 +576,8 @@ def test_compute_instance_resize_rejects_different_gpu_spec(
     )
 
     try:
-        original_api = grpc.get_compute_instance(ci_id=ci_uuid)
-        original_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
-        original_snapshot = _configuration_snapshot(original_cr)
-        with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=gpu_type)
-
-        assert_grpc_rejected(exc_info, "FailedPrecondition")
-        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == _instance_type_name(original_api)
-        assert _configuration_snapshot(k8s_hub_client.get_json(resource="computeinstance", name=ci_name)) == (
-            original_snapshot
+        _assert_resize_rejected_without_changes(
+            grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=gpu_type
         )
     finally:
         try:
