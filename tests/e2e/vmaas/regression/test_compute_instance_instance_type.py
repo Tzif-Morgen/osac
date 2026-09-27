@@ -17,14 +17,15 @@ from tests.e2e.core.helpers import (
     unique_name,
     wait_for_cr,
     wait_for_deletion,
+    wait_for_new_vmi,
     wait_for_provision,
+    wait_for_restart,
     wait_for_running,
 )
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import poll_until, run_unchecked
 from tests.e2e.vmaas.helpers import delete_instance_type_if_present
-from tests.e2e.vmaas.regression.helpers import restart_compute_instance_and_wait_for_vmi
 
 pytestmark = pytest.mark.regression
 
@@ -193,17 +194,19 @@ def _restart_after_resize(
 ) -> None:
     previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
     restart_timestamp = _next_restart_timestamp(previous_last_restarted)
-    restart_compute_instance_and_wait_for_vmi(
-        grpc,
-        k8s_hub,
-        k8s_virt,
-        uuid=ci_uuid,
+    grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
+    wait_for_restart(
+        k8s=k8s_hub,
         name=ci_name,
+        initial=previous_last_restarted,
+        restart_ts=restart_timestamp,
+    )
+    wait_for_running(k8s=k8s_hub, name=ci_name)
+    wait_for_new_vmi(
+        k8s=k8s_virt,
         vmi_namespace=vmi_namespace,
-        vm_template=vm_template,
-        restart_timestamp=restart_timestamp,
-        initial_last_restarted_at=previous_last_restarted,
-        initial_vmi_timestamp=initial_vmi_timestamp,
+        compute_instance_name=ci_name,
+        initial_timestamp=initial_vmi_timestamp,
     )
     poll_until(
         fn=lambda: k8s_hub.get_compute_instance_condition_status(
