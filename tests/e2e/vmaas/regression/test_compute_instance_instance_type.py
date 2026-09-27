@@ -277,7 +277,7 @@ def compute_instance_type_editor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         "\n"
         "path = Path(sys.argv[1])\n"
         "compute_instance = json.loads(path.read_text())\n"
-        "compute_instance['spec']['instance_type']['name'] = os.environ['OSAC_E2E_TARGET_INSTANCE_TYPE']\n"
+        "compute_instance['spec']['instance_type'] = {'id': os.environ['OSAC_E2E_TARGET_INSTANCE_TYPE']}\n"
         "path.write_text(json.dumps(compute_instance))\n",
         encoding="utf-8",
     )
