@@ -7,7 +7,6 @@ import pytest
 
 from tests.e2e.core.grpc_client import GRPCClient
 from tests.e2e.core.helpers import (
-    delete_instance_type_if_present,
     unique_name,
     wait_for_cr,
     wait_for_deletion,
@@ -16,6 +15,7 @@ from tests.e2e.core.helpers import (
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import poll_until
+from tests.e2e.vmaas.helpers import delete_instance_type_if_present
 
 pytestmark = pytest.mark.regression
 

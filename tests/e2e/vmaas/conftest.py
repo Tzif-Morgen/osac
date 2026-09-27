@@ -13,6 +13,7 @@ from tests.e2e.core.helpers import wait_for_tenant_condition
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import env
+from tests.e2e.vmaas.helpers import delete_instance_type_if_present
 from tests.e2e.vmaas.networking_lifecycle_helpers import (
     create_and_wait_for_subnet,
     create_and_wait_for_virtual_network,
@@ -120,12 +121,7 @@ def default_instance_type(private_grpc: GRPCClient, test_run_id: str) -> Iterato
         name=it_name, vcpus=DEFAULT_IT_VCPUS, memory_gib=DEFAULT_IT_MEMORY_GIB, description="Default E2E instance type"
     )
     yield it_name
-    try:
-        private_grpc.delete_instance_type(name=it_name)
-    except subprocess.CalledProcessError as e:
-        output = ((e.stdout or "") + (e.stderr or "")).lower()
-        if "not found" not in output:
-            raise
+    delete_instance_type_if_present(grpc=private_grpc, name=it_name)
 
 
 @pytest.fixture(scope="session")
