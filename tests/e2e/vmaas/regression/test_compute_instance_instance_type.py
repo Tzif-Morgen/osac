@@ -74,14 +74,15 @@ def active_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
 
 
 @pytest.fixture
-def resize_instance_types(private_grpc: GRPCClient, active_instance_type: str) -> Iterator[dict[str, str]]:
+def medium_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
+    """Create the medium resize target; active_instance_type provides the small type."""
     medium_name = f"e2e-resize-medium-{uuid4().hex[:8]}"
     medium_vcpus, medium_memory_gib = RESIZE_TYPE_RESOURCES["medium"]
     private_grpc.create_instance_type(
         name=medium_name, vcpus=medium_vcpus, memory_gib=medium_memory_gib, description="E2E VM resize test type"
     )
     try:
-        yield {"small": active_instance_type, "medium": medium_name}
+        yield medium_name
     finally:
         delete_instance_type_if_present(grpc=private_grpc, name=medium_name)
 
@@ -294,9 +295,11 @@ def running_compute_instance_factory(
     k8s_hub_client: K8sClient,
     default_subnet: str,
     vm_template: str,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
+    medium_instance_type: str,
 ) -> Iterator[Callable[[str], tuple[str, str]]]:
     created: list[tuple[str, str]] = []
+    instance_types_by_size = {"small": active_instance_type, "medium": medium_instance_type}
 
     def create(instance_type_key: str) -> tuple[str, str]:
         vcpus, memory_gib = RESIZE_TYPE_RESOURCES[instance_type_key]
@@ -304,7 +307,7 @@ def running_compute_instance_factory(
             name=unique_name("e2e-resize"),
             template=vm_template,
             network_attachments=[{"subnet": default_subnet}],
-            instance_type=resize_instance_types[instance_type_key],
+            instance_type=instance_types_by_size[instance_type_key],
             run_strategy="Always",
         )
         ci_name: str | None = None
@@ -522,7 +525,8 @@ def test_compute_instance_resize_via_cli(
     cli: OsacCLI,
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
+    medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
     monkeypatch: pytest.MonkeyPatch,
     source_type: str,
@@ -531,14 +535,16 @@ def test_compute_instance_resize_via_cli(
     target_memory_gib: int,
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory(source_type)
+    instance_types_by_size = {"small": active_instance_type, "medium": medium_instance_type}
     original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_version = original.get("status", {}).get("desiredConfigVersion", "")
 
-    monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", resize_instance_types[target_type])
+    target_instance_type = instance_types_by_size[target_type]
+    monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", target_instance_type)
     cli.edit_compute_instance(uuid=ci_uuid)
 
     response = grpc.get_compute_instance(ci_id=ci_uuid)
-    assert _instance_type_name(response) == resize_instance_types[target_type]
+    assert _instance_type_name(response) == target_instance_type
     updated = _wait_for_configuration_applied(
         k8s_hub_client,
         name=ci_name,
@@ -553,11 +559,12 @@ def test_compute_instance_resize_to_deprecated_type_returns_warning(
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
+    medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
-    target = resize_instance_types["medium"]
+    target = medium_instance_type
     original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_version = original.get("status", {}).get("desiredConfigVersion", "")
     private_grpc.update_instance_type(name=target, state="INSTANCE_TYPE_STATE_DEPRECATED")
@@ -568,7 +575,7 @@ def test_compute_instance_resize_to_deprecated_type_returns_warning(
                 "id": target,
                 "spec": {
                     "deprecation": {
-                        "replacement": {"name": resize_instance_types["small"]},
+                        "replacement": {"name": active_instance_type},
                         "obsolescence_timestamp": "2030-01-01T00:00:00Z",
                     }
                 },
@@ -581,7 +588,7 @@ def test_compute_instance_resize_to_deprecated_type_returns_warning(
 
     warnings = response.get("warnings", [])
     assert len(warnings) == 1
-    assert resize_instance_types["small"] in warnings[0]
+    assert active_instance_type in warnings[0]
     assert "2030-01-01" in warnings[0]
     assert _instance_type_name(response) == target
     _wait_for_configuration_applied(
@@ -593,11 +600,11 @@ def test_compute_instance_resize_to_obsolete_type_is_rejected(
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
+    medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
-    target = resize_instance_types["medium"]
+    target = medium_instance_type
     private_grpc.update_instance_type(name=target, state="INSTANCE_TYPE_STATE_OBSOLETE")
     _assert_resize_rejected_without_changes(
         grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=target
@@ -607,7 +614,7 @@ def test_compute_instance_resize_to_obsolete_type_is_rejected(
 def test_compute_instance_resize_to_current_type_is_noop(
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
@@ -615,21 +622,20 @@ def test_compute_instance_resize_to_current_type_is_noop(
     original_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_snapshot = _configuration_snapshot(original_cr)
 
-    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=resize_instance_types["small"])
+    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=active_instance_type)
 
     assert response.get("warnings", []) == []
     assert _instance_type_name(response) == _instance_type_name(original_api)
     current_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     assert _configuration_snapshot(current_cr) == original_snapshot
     assert _condition_status(current_cr, "ConfigurationApplied") == "True"
-    assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["small"]
+    assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == active_instance_type
 
 
 def test_compute_instance_resize_rejects_different_gpu_spec(
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
-    resize_instance_types: dict[str, str],
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
@@ -654,7 +660,7 @@ def test_compute_instance_resize_while_stopped_applies_on_start(
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     k8s_virt_client: K8sClient,
-    resize_instance_types: dict[str, str],
+    medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
@@ -669,9 +675,9 @@ def test_compute_instance_resize_while_stopped_applies_on_start(
     original = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_version = original.get("status", {}).get("desiredConfigVersion", "")
 
-    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=resize_instance_types["medium"])
+    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=medium_instance_type)
 
-    assert _instance_type_name(response) == resize_instance_types["medium"]
+    assert _instance_type_name(response) == medium_instance_type
     grpc.update_compute_instance_run_strategy(ci_id=ci_uuid, run_strategy="Always")
     wait_for_running(k8s=k8s_hub_client, name=ci_name)
     _wait_for_configuration_applied(
@@ -691,7 +697,8 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
     k8s_hub_client: K8sClient,
     k8s_virt_client: K8sClient,
     vm_template: str,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
+    medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
@@ -699,6 +706,7 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
     _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=2, memory_gib=4)
 
     current_key = "small"
+    instance_types_by_size = {"small": active_instance_type, "medium": medium_instance_type}
     for target_key in ("medium", "small"):
         current_vcpus, current_memory = RESIZE_TYPE_RESOURCES[current_key]
         target_vcpus, target_memory = RESIZE_TYPE_RESOURCES[target_key]
@@ -715,7 +723,7 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
             ci_name=ci_name,
             vmi_namespace=vm_namespace,
             vm_template=vm_template,
-            target_instance_type=resize_instance_types[target_key],
+            target_instance_type=instance_types_by_size[target_key],
             current_vcpus=current_vcpus,
             current_memory_gib=current_memory,
             target_vcpus=target_vcpus,
@@ -734,7 +742,8 @@ def test_compute_instance_resize_from_catalog_item(
     default_subnet: str,
     default_storage_tier: str,
     default_disk_image: str,
-    resize_instance_types: dict[str, str],
+    active_instance_type: str,
+    medium_instance_type: str,
 ) -> None:
     """Verify a CatalogItem with an editable instance type can provision and resize a VM."""
     fields = {
@@ -764,7 +773,7 @@ def test_compute_instance_resize_from_catalog_item(
                     "metadata": {"name": unique_name("e2e-resize-from-catalog")},
                     "spec": {
                         "catalog_item": {"id": catalog_item_id},
-                        "instance_type": {"name": resize_instance_types["small"]},
+                        "instance_type": {"name": active_instance_type},
                         "boot_disk": {"size_gib": 20, "storage_tier": {"name": default_storage_tier}},
                         "network_attachments": [{"subnet": {"id": default_subnet}}],
                         "disk_image": {"name": default_disk_image},
@@ -783,7 +792,7 @@ def test_compute_instance_resize_from_catalog_item(
         previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
             vmi_namespace=vm_namespace, compute_instance_name=ci_name
         )
-        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["small"]
+        assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == active_instance_type
 
         original_version = current.get("status", {}).get("desiredConfigVersion", "")
         _resize_and_restart_compute_instance(
@@ -794,7 +803,7 @@ def test_compute_instance_resize_from_catalog_item(
             ci_name=ci_name,
             vmi_namespace=vm_namespace,
             vm_template=vm_template,
-            target_instance_type=resize_instance_types["medium"],
+            target_instance_type=medium_instance_type,
             current_vcpus=2,
             current_memory_gib=4,
             target_vcpus=4,
