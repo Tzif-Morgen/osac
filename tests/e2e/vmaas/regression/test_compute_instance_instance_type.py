@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -215,6 +217,7 @@ def _restart_after_resize(
 
 
 def _resize_and_restart_compute_instance(
+    cli: OsacCLI,
     grpc: GRPCClient,
     k8s_hub: K8sClient,
     k8s_virt: K8sClient,
@@ -231,8 +234,8 @@ def _resize_and_restart_compute_instance(
     previous_config_version: str,
     initial_vmi_timestamp: str,
 ) -> None:
-    update_response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target_instance_type)
-    assert update_response.get("warnings", []) == []
+    cli.edit_compute_instance(uuid=ci_uuid)
+    update_response = grpc.get_compute_instance(ci_id=ci_uuid)
     assert _instance_type_name(update_response) == target_instance_type
 
     updated = _wait_for_configuration_applied(
@@ -261,6 +264,26 @@ def _resize_and_restart_compute_instance(
     _wait_for_vmi_resources(
         k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=target_vcpus, memory_gib=target_memory_gib
     )
+
+
+@pytest.fixture
+def compute_instance_type_editor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    editor = tmp_path / "edit-compute-instance.py"
+    editor.write_text(
+        f"#!{sys.executable}\n"
+        "import json\n"
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "path = Path(sys.argv[1])\n"
+        "compute_instance = json.loads(path.read_text())\n"
+        "compute_instance['spec']['instance_type']['name'] = os.environ['OSAC_E2E_TARGET_INSTANCE_TYPE']\n"
+        "path.write_text(json.dumps(compute_instance))\n",
+        encoding="utf-8",
+    )
+    editor.chmod(0o700)
+    monkeypatch.setenv("EDITOR", str(editor))
 
 
 @pytest.fixture
@@ -658,13 +681,16 @@ def test_compute_instance_resize_while_stopped_applies_on_start(
     _wait_for_vmi_resources(k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=4, memory_gib=8)
 
 
-def test_compute_instance_resize_requires_restart_and_applies_new_resources(
+def test_compute_instance_resize_via_cli_requires_restart_and_applies_new_resources(
+    cli: OsacCLI,
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     k8s_virt_client: K8sClient,
     vm_template: str,
     resize_instance_types: dict[str, str],
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
+    compute_instance_type_editor: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("small")
     vm_namespace = k8s_hub_client.get_compute_instance_vm_namespace(name=ci_name)
@@ -679,7 +705,9 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
         previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
             vmi_namespace=vm_namespace, compute_instance_name=ci_name
         )
+        monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", resize_instance_types[target_key])
         _resize_and_restart_compute_instance(
+            cli,
             grpc,
             k8s_hub_client,
             k8s_virt_client,
@@ -698,7 +726,8 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
         current_key = target_key
 
 
-def test_compute_instance_resize_from_catalog_item(
+def test_compute_instance_resize_from_catalog_item_via_cli(
+    cli: OsacCLI,
     grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     k8s_virt_client: K8sClient,
@@ -707,6 +736,8 @@ def test_compute_instance_resize_from_catalog_item(
     default_storage_tier: str,
     default_disk_image: str,
     resize_instance_types: dict[str, str],
+    compute_instance_type_editor: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a CatalogItem with an editable instance type can provision and resize a VM."""
     fields = {
@@ -758,7 +789,9 @@ def test_compute_instance_resize_from_catalog_item(
         assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == resize_instance_types["small"]
 
         original_version = current.get("status", {}).get("desiredConfigVersion", "")
+        monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", resize_instance_types["medium"])
         _resize_and_restart_compute_instance(
+            cli,
             grpc,
             k8s_hub_client,
             k8s_virt_client,

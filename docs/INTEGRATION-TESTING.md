@@ -301,7 +301,7 @@ Touched-area requirements: [component guide](../tests/e2e/AGENTS.md#touched-area
 | Tier | Location / command | Exercises for real | Faked or omitted |
 |---|---|---|---|
 | Unit | `tests/unit/test_grpc_client.py`; from the repository root, run `uv run pytest tests/unit/test_grpc_client.py` | The resize helper's public gRPC service name, payload, update mask, and response handling | `GRPCClient.call` is stubbed; no deployed API or reconciliation is exercised. |
-| E2E (VMaaS regression) | `tests/e2e/vmaas/regression/test_compute_instance_instance_type.py`; from the repository root, run `uv run pytest tests/e2e/vmaas/regression/test_compute_instance_instance_type.py` | The deployed VMaaS API and Kubernetes path, including ComputeInstance configuration, conditions, CatalogItem provisioning, and VMI resources | No services are mocked. The suite requires the configured VMaaS environment and provider path. Multi-node live hot-plug is omitted; see [OSAC-5335](https://redhat.atlassian.net/browse/OSAC-5335). |
+| E2E (VMaaS regression) | `tests/e2e/vmaas/regression/test_compute_instance_instance_type.py`; from the repository root, run `uv run pytest tests/e2e/vmaas/regression/test_compute_instance_instance_type.py` | The deployed VMaaS API and Kubernetes path, including CLI `edit`, ComputeInstance configuration and conditions, CatalogItem provisioning, and VMI resources | No services are mocked. The suite requires the configured VMaaS environment and provider path. Multi-node live hot-plug is omitted; see [OSAC-5335](https://redhat.atlassian.net/browse/OSAC-5335). |
 
 ### Coverage notes
 

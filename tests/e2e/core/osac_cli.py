@@ -174,6 +174,9 @@ class OsacCLI:
     def delete_compute_instance(self, *, uuid: str) -> None:
         self._run("delete", "computeinstance", uuid)
 
+    def edit_compute_instance(self, *, uuid: str) -> str:
+        return self._run("edit", "--output", "json", "computeinstance", uuid)
+
     def create_instance_type(
         self,
         *,
