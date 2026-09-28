@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 
 from tests.e2e.core.grpc_client import PRIVATE_API, GRPCClient
+from tests.e2e.core.helpers import delete_instance_type_if_present
 from tests.e2e.core.osac_cli import OsacCLI
-from tests.e2e.vmaas.helpers import delete_instance_type_if_present
 
 pytestmark = pytest.mark.sanity
 

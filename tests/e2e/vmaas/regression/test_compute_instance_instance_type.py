@@ -14,6 +14,7 @@ import pytest
 from tests.e2e.core.grpc_client import GRPCClient
 from tests.e2e.core.helpers import (
     assert_grpc_rejected,
+    delete_instance_type_if_present,
     unique_name,
     wait_for_cr,
     wait_for_deletion,
@@ -25,7 +26,6 @@ from tests.e2e.core.helpers import (
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import poll_until, run_unchecked
-from tests.e2e.vmaas.helpers import delete_instance_type_if_present
 
 pytestmark = pytest.mark.regression
 
@@ -68,10 +68,7 @@ def active_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
     """Create an ACTIVE instance type for testing; clean up after."""
     it_name = f"e2e-ci-it-{uuid4().hex[:8]}"
     private_grpc.create_instance_type(
-        name=it_name,
-        vcpus=IT_VCPUS,
-        memory_gib=IT_MEMORY_GIB,
-        description="E2E compute instance test type",
+        name=it_name, vcpus=IT_VCPUS, memory_gib=IT_MEMORY_GIB, description="E2E compute instance test type"
     )
     yield it_name
     delete_instance_type_if_present(grpc=private_grpc, name=it_name)
@@ -82,10 +79,7 @@ def medium_instance_type(private_grpc: GRPCClient) -> Iterator[str]:
     """Create the medium resize target; active_instance_type provides the base type."""
     medium_name = f"e2e-resize-medium-{uuid4().hex[:8]}"
     private_grpc.create_instance_type(
-        name=medium_name,
-        vcpus=MEDIUM_IT_VCPUS,
-        memory_gib=MEDIUM_IT_MEMORY_GIB,
-        description="E2E VM resize test type",
+        name=medium_name, vcpus=MEDIUM_IT_VCPUS, memory_gib=MEDIUM_IT_MEMORY_GIB, description="E2E VM resize test type"
     )
     try:
         yield medium_name
@@ -225,12 +219,7 @@ def _resize_and_restart_compute_instance(
     previous_last_restarted = k8s_hub.get_compute_instance_last_restarted_at(name=ci_name)
     restart_timestamp = _next_restart_timestamp(previous_last_restarted)
     grpc.update_restart(uuid=ci_uuid, template=vm_template, timestamp=restart_timestamp)
-    wait_for_restart(
-        k8s=k8s_hub,
-        name=ci_name,
-        initial=previous_last_restarted,
-        restart_ts=restart_timestamp,
-    )
+    wait_for_restart(k8s=k8s_hub, name=ci_name, initial=previous_last_restarted, restart_ts=restart_timestamp)
     wait_for_running(k8s=k8s_hub, name=ci_name)
     wait_for_new_vmi(
         k8s=k8s_virt,
@@ -346,8 +335,7 @@ def test_compute_instance_happy_path(
             f"E2E-02: reconciler should expand vCPUs from instance type: {spec['vcpus']} != {IT_VCPUS}"
         )
         assert spec["memoryGiB"] == IT_MEMORY_GIB, (
-            f"E2E-02: reconciler should expand memory from instance type: {spec['memoryGiB']} != "
-            f"{IT_MEMORY_GIB}"
+            f"E2E-02: reconciler should expand memory from instance type: {spec['memoryGiB']} != {IT_MEMORY_GIB}"
         )
 
         # Verify osac.openshift.io/instance-type-name label (E2E-03)
@@ -505,10 +493,7 @@ def test_compute_instance_obsolete_instance_type(
 @pytest.mark.usefixtures("compute_instance_type_editor")
 @pytest.mark.parametrize(
     ("source_type", "target_type", "target_vcpus", "target_memory_gib"),
-    (
-        ("active", "medium", MEDIUM_IT_VCPUS, MEDIUM_IT_MEMORY_GIB),
-        ("medium", "active", IT_VCPUS, IT_MEMORY_GIB),
-    ),
+    (("active", "medium", MEDIUM_IT_VCPUS, MEDIUM_IT_MEMORY_GIB), ("medium", "active", IT_VCPUS, IT_MEMORY_GIB)),
     ids=("up", "down"),
 )
 def test_compute_instance_resize_via_cli(
@@ -708,11 +693,7 @@ def test_compute_instance_resize_requires_restart_and_applies_new_resources(
     ci_uuid, ci_name = running_compute_instance_factory("active")
     vm_namespace = k8s_hub_client.get_compute_instance_vm_namespace(name=ci_name)
     _wait_for_vmi_resources(
-        k8s_virt_client,
-        vmi_namespace=vm_namespace,
-        ci_name=ci_name,
-        vcpus=IT_VCPUS,
-        memory_gib=IT_MEMORY_GIB,
+        k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=IT_VCPUS, memory_gib=IT_MEMORY_GIB
     )
 
     current_vcpus, current_memory = IT_VCPUS, IT_MEMORY_GIB
@@ -802,11 +783,7 @@ def test_compute_instance_resize_from_catalog_item(
         )
         vm_namespace = k8s_hub_client.get_compute_instance_vm_namespace(name=ci_name)
         _wait_for_vmi_resources(
-            k8s_virt_client,
-            vmi_namespace=vm_namespace,
-            ci_name=ci_name,
-            vcpus=IT_VCPUS,
-            memory_gib=IT_MEMORY_GIB,
+            k8s_virt_client, vmi_namespace=vm_namespace, ci_name=ci_name, vcpus=IT_VCPUS, memory_gib=IT_MEMORY_GIB
         )
         previous_vmi_timestamp = k8s_virt_client.get_vmi_creation_timestamp(
             vmi_namespace=vm_namespace, compute_instance_name=ci_name

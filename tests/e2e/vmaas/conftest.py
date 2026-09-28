@@ -9,11 +9,10 @@ from collections.abc import Iterator
 import pytest
 
 from tests.e2e.core.grpc_client import GRPCClient
-from tests.e2e.core.helpers import wait_for_tenant_condition
+from tests.e2e.core.helpers import delete_instance_type_if_present, wait_for_tenant_condition
 from tests.e2e.core.k8s_client import K8sClient
 from tests.e2e.core.osac_cli import OsacCLI
 from tests.e2e.core.runner import env
-from tests.e2e.vmaas.helpers import delete_instance_type_if_present
 from tests.e2e.vmaas.networking_lifecycle_helpers import (
     create_and_wait_for_subnet,
     create_and_wait_for_virtual_network,
