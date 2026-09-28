@@ -297,9 +297,15 @@ func (c *runnerContext) fetchObject(ctx context.Context, key string) (proto.Mess
 	return object, nil
 }
 
-func (c *runnerContext) update(ctx context.Context, object proto.Message) (result proto.Message, err error) {
-	result, err = c.helper.Update(ctx, object)
-	return
+func (c *runnerContext) update(ctx context.Context, object proto.Message) (proto.Message, error) {
+	result, err := c.helper.Update(ctx, object)
+	if err != nil {
+		return nil, err
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(c.console.Stderr(), "Warning: %s\n", warning)
+	}
+	return result.Object, nil
 }
 
 func (c *runnerContext) isWatchable() bool {
