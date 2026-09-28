@@ -530,13 +530,16 @@ def test_compute_instance_resize_via_cli(
     assert _condition_status(updated, "RestartRequired") == "True"
 
 
-def test_compute_instance_resize_to_deprecated_type_returns_warning(
+@pytest.mark.usefixtures("compute_instance_type_editor")
+def test_compute_instance_resize_to_deprecated_type_warns_via_cli(
+    cli: OsacCLI,
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     active_instance_type: str,
     medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("active")
     target = medium_instance_type
@@ -559,20 +562,25 @@ def test_compute_instance_resize_to_deprecated_type_returns_warning(
         },
     )
 
-    response = grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target)
+    monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", target)
+    result = cli.edit_compute_instance(uuid=ci_uuid)
 
-    warnings = response.get("warnings", [])
-    assert len(warnings) == 1
+    warnings = [line for line in result.stderr.splitlines() if line.startswith("Warning: ")]
+    assert len(warnings) == 1, f"Expected one deprecation warning on stderr, got: {result.stderr}"
+    assert "deprecated" in warnings[0].lower()
+    assert target in warnings[0]
     assert active_instance_type in warnings[0]
     assert "2030-01-01" in warnings[0]
+    response = grpc.get_compute_instance(ci_id=ci_uuid)
     assert _instance_type_name(response) == target
-    _wait_for_configuration_applied(
+    updated = _wait_for_configuration_applied(
         k8s_hub_client,
         name=ci_name,
         vcpus=MEDIUM_IT_VCPUS,
         memory_gib=MEDIUM_IT_MEMORY_GIB,
         previous_config_version=original_version,
     )
+    assert _condition_status(updated, "RestartRequired") == "True"
 
 
 def test_compute_instance_resize_to_obsolete_type_is_rejected(

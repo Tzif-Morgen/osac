@@ -174,8 +174,15 @@ class OsacCLI:
     def delete_compute_instance(self, *, uuid: str) -> None:
         self._run("delete", "computeinstance", uuid)
 
-    def edit_compute_instance(self, *, uuid: str) -> str:
-        return self._run("edit", "--output", "json", "computeinstance", uuid)
+    def edit_compute_instance(self, *, uuid: str) -> subprocess.CompletedProcess[str]:
+        """Edit a ComputeInstance and retain stderr for warning assertions."""
+        return subprocess.run(
+            (self.binary, "--config", self._config_dir, "edit", "--output", "json", "computeinstance", uuid),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=True,
+        )
 
     def create_instance_type(
         self,
