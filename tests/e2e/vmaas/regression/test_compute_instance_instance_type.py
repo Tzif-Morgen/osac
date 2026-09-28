@@ -13,7 +13,6 @@ import pytest
 
 from tests.e2e.core.grpc_client import GRPCClient
 from tests.e2e.core.helpers import (
-    assert_grpc_rejected,
     delete_instance_type_if_present,
     unique_name,
     wait_for_cr,
@@ -130,17 +129,20 @@ def _configuration_snapshot(compute_instance: dict[str, Any]) -> tuple[Any, ...]
     return (compute_instance.get("metadata", {}).get("generation"), status.get("desiredConfigVersion", ""), job_ids)
 
 
-def _assert_resize_rejected_without_changes(
-    grpc: GRPCClient, k8s_hub_client: K8sClient, *, ci_uuid: str, ci_name: str, target_instance_type: str
+def _assert_cli_resize_rejected_without_changes(
+    cli: OsacCLI, grpc: GRPCClient, k8s_hub_client: K8sClient, *, ci_uuid: str, ci_name: str, expected_error: str
 ) -> None:
     original_api = grpc.get_compute_instance(ci_id=ci_uuid)
     original_cr = k8s_hub_client.get_json(resource="computeinstance", name=ci_name)
     original_snapshot = _configuration_snapshot(original_cr)
 
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
-        grpc.update_compute_instance_instance_type(ci_id=ci_uuid, instance_type=target_instance_type)
+        cli.edit_compute_instance(uuid=ci_uuid)
 
-    assert_grpc_rejected(exc_info, "FailedPrecondition")
+    assert exc_info.value.returncode != 0
+    stderr = exc_info.value.stderr or ""
+    assert "failedprecondition" in stderr.lower(), f"Expected FailedPrecondition on stderr, got: {stderr}"
+    assert expected_error.lower() in stderr.lower(), f"Expected {expected_error!r} on stderr, got: {stderr}"
     assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == _instance_type_name(original_api)
     assert _configuration_snapshot(k8s_hub_client.get_json(resource="computeinstance", name=ci_name)) == (
         original_snapshot
@@ -583,18 +585,27 @@ def test_compute_instance_resize_to_deprecated_type_warns_via_cli(
     assert _condition_status(updated, "RestartRequired") == "True"
 
 
-def test_compute_instance_resize_to_obsolete_type_is_rejected(
+@pytest.mark.usefixtures("compute_instance_type_editor")
+def test_compute_instance_resize_to_obsolete_type_is_rejected_via_cli(
+    cli: OsacCLI,
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     medium_instance_type: str,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("active")
     target = medium_instance_type
     private_grpc.update_instance_type(name=target, state="INSTANCE_TYPE_STATE_OBSOLETE")
-    _assert_resize_rejected_without_changes(
-        grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=target
+    monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", target)
+    _assert_cli_resize_rejected_without_changes(
+        cli,
+        grpc,
+        k8s_hub_client,
+        ci_uuid=ci_uuid,
+        ci_name=ci_name,
+        expected_error=f"instance type '{target}' is obsolete",
     )
 
 
@@ -619,11 +630,14 @@ def test_compute_instance_resize_to_current_type_is_noop(
     assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == active_instance_type
 
 
-def test_compute_instance_resize_rejects_different_gpu_spec(
+@pytest.mark.usefixtures("compute_instance_type_editor")
+def test_compute_instance_resize_rejects_different_gpu_spec_via_cli(
+    cli: OsacCLI,
     grpc: GRPCClient,
     private_grpc: GRPCClient,
     k8s_hub_client: K8sClient,
     running_compute_instance_factory: Callable[[str], tuple[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ci_uuid, ci_name = running_compute_instance_factory("active")
     gpu_type = f"e2e-resize-gpu-{uuid4().hex[:8]}"
@@ -636,8 +650,14 @@ def test_compute_instance_resize_rejects_different_gpu_spec(
     )
 
     try:
-        _assert_resize_rejected_without_changes(
-            grpc, k8s_hub_client, ci_uuid=ci_uuid, ci_name=ci_name, target_instance_type=gpu_type
+        monkeypatch.setenv("OSAC_E2E_TARGET_INSTANCE_TYPE", gpu_type)
+        _assert_cli_resize_rejected_without_changes(
+            cli,
+            grpc,
+            k8s_hub_client,
+            ci_uuid=ci_uuid,
+            ci_name=ci_name,
+            expected_error="cannot change GPU configuration",
         )
     finally:
         delete_instance_type_if_present(grpc=private_grpc, name=gpu_type)
