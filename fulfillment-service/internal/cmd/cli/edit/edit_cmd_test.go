@@ -16,8 +16,11 @@ package edit
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"sync/atomic"
 
 	. "github.com/onsi/ginkgo/v2/dsl/core"
 	. "github.com/onsi/ginkgo/v2/dsl/table"
@@ -100,16 +103,19 @@ var _ = Describe("Edit command", func() {
 
 	Describe("update", func() {
 		var (
-			warnings  []string
-			updateErr error
+			warnings    []string
+			updateErr   error
+			updateCalls atomic.Int32
 		)
 
 		BeforeEach(func() {
 			warnings = nil
 			updateErr = nil
+			updateCalls.Store(0)
 			publicv1.RegisterComputeInstancesServer(server.Registrar(), &testing.ComputeInstancesServerFuncs{
 				UpdateFunc: func(ctx context.Context, request *publicv1.ComputeInstancesUpdateRequest,
 				) (*publicv1.ComputeInstancesUpdateResponse, error) {
+					updateCalls.Add(1)
 					if updateErr != nil {
 						return nil, updateErr
 					}
@@ -145,6 +151,31 @@ var _ = Describe("Edit command", func() {
 				"Warning: First warning\nWarning: Second warning\n",
 			),
 		)
+
+		It("reports warning output failures after a successful update without retrying", func() {
+			reader, writer := io.Pipe()
+			Expect(reader.Close()).To(Succeed())
+			DeferCleanup(writer.Close)
+			console, err := terminal.NewConsole().
+				SetLogger(logger).
+				SetStdout(output).
+				SetStderr(writer).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+
+			warnings = []string{"Instance type is deprecated."}
+			object := &publicv1.ComputeInstance{Id: "test-vm"}
+			runner := &runnerContext{helper: helper, console: console}
+
+			updated, err := runner.update(ctx, object)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("update succeeded, but failed to write warning to stderr"))
+			Expect(errors.Is(err, io.ErrClosedPipe)).To(BeTrue())
+			Expect(proto.Equal(updated, object)).To(BeTrue())
+			Expect(updateCalls.Load()).To(Equal(int32(1)))
+			Expect(output.String()).To(BeEmpty())
+		})
 
 		It("preserves update failures without printing warnings", func() {
 			updateErr = grpcstatus.Error(codes.FailedPrecondition, "instance type is obsolete")

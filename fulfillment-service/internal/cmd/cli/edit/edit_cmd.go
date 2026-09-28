@@ -303,7 +303,9 @@ func (c *runnerContext) update(ctx context.Context, object proto.Message) (proto
 		return nil, err
 	}
 	for _, warning := range result.Warnings {
-		fmt.Fprintf(c.console.Stderr(), "Warning: %s\n", warning)
+		if _, err := fmt.Fprintf(c.console.Stderr(), "Warning: %s\n", warning); err != nil {
+			return result.Object, fmt.Errorf("update succeeded, but failed to write warning to stderr: %w", err)
+		}
 	}
 	return result.Object, nil
 }
