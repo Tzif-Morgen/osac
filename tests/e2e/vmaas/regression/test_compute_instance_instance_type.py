@@ -205,7 +205,7 @@ def _resize_and_restart_compute_instance(
     assert update_response.get("warnings", []) == []
     assert _instance_type_name(update_response) == target_instance_type
 
-    updated = _wait_for_configuration_applied(
+    _wait_for_configuration_applied(
         k8s_hub,
         name=ci_name,
         vcpus=target_vcpus,
@@ -213,7 +213,15 @@ def _resize_and_restart_compute_instance(
         previous_config_version=previous_config_version,
     )
     assert _instance_type_name(grpc.get_compute_instance(ci_id=ci_uuid)) == target_instance_type
-    assert _condition_status(updated, "RestartRequired") == "True"
+    poll_until(
+        fn=lambda: k8s_hub.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status == "True",
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired after resize",
+    )
 
     _wait_for_vmi_resources(
         k8s_virt, vmi_namespace=vmi_namespace, ci_name=ci_name, vcpus=current_vcpus, memory_gib=current_memory_gib
@@ -233,7 +241,7 @@ def _resize_and_restart_compute_instance(
         fn=lambda: k8s_hub.get_compute_instance_condition_status(
             name=ci_name, condition_type="RestartRequired", checked=False
         ),
-        until=lambda status: status in ("", "False"),
+        until=lambda status: status == "False",
         retries=60,
         delay=5,
         description=f"{ci_name} RestartRequired cleared after manual resize restart",
@@ -522,14 +530,22 @@ def test_compute_instance_resize_via_cli(
 
     response = grpc.get_compute_instance(ci_id=ci_uuid)
     assert _instance_type_name(response) == target_instance_type
-    updated = _wait_for_configuration_applied(
+    _wait_for_configuration_applied(
         k8s_hub_client,
         name=ci_name,
         vcpus=target_vcpus,
         memory_gib=target_memory_gib,
         previous_config_version=original_version,
     )
-    assert _condition_status(updated, "RestartRequired") == "True"
+    poll_until(
+        fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status == "True",
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired after resize",
+    )
 
 
 @pytest.mark.usefixtures("compute_instance_type_editor")
@@ -575,14 +591,22 @@ def test_compute_instance_resize_to_deprecated_type_warns_via_cli(
     assert "2030-01-01" in warnings[0]
     response = grpc.get_compute_instance(ci_id=ci_uuid)
     assert _instance_type_name(response) == target
-    updated = _wait_for_configuration_applied(
+    _wait_for_configuration_applied(
         k8s_hub_client,
         name=ci_name,
         vcpus=MEDIUM_IT_VCPUS,
         memory_gib=MEDIUM_IT_MEMORY_GIB,
         previous_config_version=original_version,
     )
-    assert _condition_status(updated, "RestartRequired") == "True"
+    poll_until(
+        fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status == "True",
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired after resize",
+    )
 
 
 @pytest.mark.usefixtures("compute_instance_type_editor")
@@ -694,10 +718,15 @@ def test_compute_instance_resize_while_stopped_applies_on_start(
         memory_gib=MEDIUM_IT_MEMORY_GIB,
         previous_config_version=original_version,
     )
-    restart_required = k8s_hub_client.get_compute_instance_condition_status(
-        name=ci_name, condition_type="RestartRequired", checked=False
+    poll_until(
+        fn=lambda: k8s_hub_client.get_compute_instance_condition_status(
+            name=ci_name, condition_type="RestartRequired", checked=False
+        ),
+        until=lambda status: status == "False",
+        retries=60,
+        delay=5,
+        description=f"{ci_name} RestartRequired cleared after starting resized VM",
     )
-    assert restart_required in ("", "False")
 
     vm_namespace = k8s_hub_client.get_compute_instance_vm_namespace(name=ci_name)
     _wait_for_vmi_resources(
