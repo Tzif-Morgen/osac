@@ -132,6 +132,7 @@ def wait_for_new_vmi(*, k8s: K8sClient, vmi_namespace: str, compute_instance_nam
         retries=60,
         delay=5,
         description=f"{compute_instance_name} VMI recreation",
+        retry_on_error=True,
     )
 
 
