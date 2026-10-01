@@ -3,14 +3,16 @@
 Use `osac.public.v1.ComputeInstances/Update` to select a different
 InstanceType for an existing ComputeInstance. The public REST route is
 `PATCH /api/fulfillment/v1/compute_instances/{object.id}`. The request carries
-the ComputeInstance in `object` and the paths to change in `update_mask`.
+the ComputeInstance in `object`. An Update can include `update_mask` to select
+paths, or omit it to replace the full object.
 
-For a resize, set `object.id`, set `object.spec.instance_type` to a target
-`InstanceTypeReference`, and include `spec.instance_type` in
-`update_mask.paths`. The target may have more or fewer vCPUs and more or less
-memory than the current type. A stopped VM is eligible; it uses the selected
-type when it next starts. For a running VM, the selected type may require a
-restart before its CPU and memory configuration takes effect.
+For a masked resize, set `object.id`, set `object.spec.instance_type` to a
+target `InstanceTypeReference`, and include `spec.instance_type` in
+`update_mask.paths`. The `osac edit` CLI submits a full-object Update without
+a mask. The target may have more or fewer vCPUs and more or less memory than
+the current type. A stopped VM is eligible; it uses the selected type when it
+next starts. For a running VM, the selected type may require a restart before
+its CPU and memory configuration takes effect.
 
 The Update response contains the updated `object` and, on gRPC, a repeated
 `warnings` field. Selecting a DEPRECATED target succeeds and returns a
