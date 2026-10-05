@@ -12,8 +12,8 @@ see the [ComputeInstances API reference](../../../fulfillment-service/docs/COMPU
 ## Prerequisites
 
 - Install and log in to the `osac` CLI, with access to the VM and its tenant.
-- Choose an existing InstanceType available to your tenant. It may have more
-  or fewer vCPUs or memory than the current type. Its GPU configuration must
+- A target InstanceType must be available to your tenant. It may have more or
+  fewer vCPUs or memory than the current type. Its GPU configuration must
   match the current type exactly; adding, removing, or changing GPUs through
   resize is rejected.
 - Arrange a maintenance window for a running VM. A restart interrupts guest
@@ -40,7 +40,18 @@ osac edit computeinstance <vm-name-or-id>
 ```
 
 The command opens the current ComputeInstance as YAML in your editor. Replace
-the `spec.instance_type` reference with the target, for example:
+the current `spec.instance_type` mapping with the target mapping:
+
+Before:
+
+```yaml
+spec:
+  instance_type:
+    id: <current-type-id>
+    name: standard-4
+```
+
+After:
 
 ```yaml
 spec:
@@ -48,7 +59,7 @@ spec:
     name: standard-8
 ```
 
-This is an excerpt of the object in the editor. Replace the entire
+These are excerpts of the object in the editor. Replace the entire
 `instance_type` mapping: remove the **old** `id`, `name`, `project`, and
 `shared` values, then add the target's name. If both an old ID and a new
 name remain, the ID selects the old type and the mismatched name can cause
@@ -57,11 +68,18 @@ target type's scope. Leave the rest of the VM unchanged, then save and close
 the editor. The CLI sends the edited ComputeInstance through
 `ComputeInstances.Update` as a full-object update.
 
-An ACTIVE target succeeds without a lifecycle warning. A DEPRECATED target
-succeeds and the CLI prints `Warning: ... is deprecated` to standard error;
-the notice may also include an obsolescence date or replacement. A missing
-target returns `InvalidArgument`; an OBSOLETE target or GPU change returns
-`FailedPrecondition`.
+The Update succeeds:
+
+- An ACTIVE target InstanceType succeeds without a lifecycle warning.
+- A DEPRECATED target InstanceType succeeds. The CLI prints
+  `Warning: ... is deprecated` to standard error; the notice may also include
+  an obsolescence date or replacement.
+
+The Update fails:
+
+- A missing target InstanceType returns `InvalidArgument`.
+- An OBSOLETE target InstanceType or a GPU configuration change returns
+  `FailedPrecondition`.
 
 ## 3. Check whether a restart is required
 
@@ -84,7 +102,11 @@ The stopped VM does not need the manual restart request in step 4.
 
 ## 4. Restart a running VM when required
 
-When `RestartRequired=True`, generate a current UTC timestamp:
+When `RestartRequired=True`, request a restart by setting
+`spec.restart_requested_at` to a fresh UTC timestamp later than
+`status.last_restarted_at`. This requests an immediate restart; it does not
+schedule one for the specified time. Generate the timestamp and open the VM
+for editing:
 
 ```bash
 date -u +%Y-%m-%dT%H:%M:%SZ
@@ -99,10 +121,9 @@ spec:
   restart_requested_at: "2026-10-01T14:30:00Z"
 ```
 
-Use a value later than `status.last_restarted_at`; if the timestamps would
+Ensure the value is later than `status.last_restarted_at`. If both timestamps
 fall in the same second, wait and generate a new one. Save and close the
-editor. The timestamp requests a restart immediately; it does not schedule
-one for the specified time. Keep the selected `instance_type` unchanged.
+editor. Keep the selected `instance_type` unchanged.
 
 ## 5. Confirm the result
 
