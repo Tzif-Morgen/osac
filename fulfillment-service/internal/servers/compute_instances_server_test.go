@@ -345,6 +345,9 @@ var _ = Describe("Compute instances server", func() {
 					}.Build(),
 					Status: publicv1.ComputeInstanceStatus_builder{
 						State: publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
+						Volumes: []*publicv1.ComputeInstanceVolume{
+							publicv1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-spoofed"}.Build(),
+						},
 						ComputeNetworkAttachmentStatuses: []*publicv1.ComputeNetworkAttachmentStatus{
 							publicv1.ComputeNetworkAttachmentStatus_builder{
 								SubnetRef: "spoofed-subnet",
@@ -364,6 +367,7 @@ var _ = Describe("Compute instances server", func() {
 			// statuses are dropped instead of persisted.
 			Expect(object.GetStatus().GetState()).To(Equal(publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_UNSPECIFIED))
 			Expect(object.GetStatus().GetComputeNetworkAttachmentStatuses()).To(BeEmpty())
+			Expect(object.GetStatus().GetVolumes()).To(BeEmpty())
 		})
 
 		It("List objects", func() {
@@ -640,6 +644,15 @@ var _ = Describe("Compute instances server", func() {
 			storedObject.SetStatus(privatev1.ComputeInstanceStatus_builder{
 				State:               privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
 				StateTransitionTime: storedTime,
+				Volumes: []*privatev1.ComputeInstanceVolume{
+					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-stored"}.Build(),
+				},
+				VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+					privatev1.ComputeInstanceVolumeRegistration_builder{
+						DiskKey: "boot",
+						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+					}.Build(),
+				},
 			}.Build())
 			_, err = ciDao.Update().SetObject(storedObject).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
@@ -653,6 +666,10 @@ var _ = Describe("Compute instances server", func() {
 			tampered := getResponse.GetObject()
 			tampered.GetStatus().SetState(publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING)
 			tampered.GetStatus().SetStateTransitionTime(timestamppb.Now())
+			Expect(tampered.GetStatus().GetVolumes()).To(HaveLen(1))
+			tampered.GetStatus().GetVolumes()[0].SetVolumeId("volume-forged")
+			restartTime := timestamppb.Now()
+			tampered.GetSpec().SetRestartRequestedAt(restartTime)
 			updateResponse, err := server.Update(ctx, publicv1.ComputeInstancesUpdateRequest_builder{
 				Object: tampered,
 			}.Build())
@@ -663,8 +680,11 @@ var _ = Describe("Compute instances server", func() {
 				Equal(publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING))
 			Expect(updateResponse.GetObject().GetStatus().GetStateTransitionTime().AsTime()).To(
 				Equal(storedTime.AsTime()))
+			Expect(updateResponse.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-stored"))
+			Expect(updateResponse.GetObject().GetSpec().GetRestartRequestedAt().AsTime()).To(
+				BeTemporally("~", restartTime.AsTime()))
 
-			// And they survive a round-trip through the database:
+			// The public correlation and private registration state also survive persistence:
 			after, err := server.Get(ctx, publicv1.ComputeInstancesGetRequest_builder{
 				Id: id,
 			}.Build())
@@ -673,6 +693,13 @@ var _ = Describe("Compute instances server", func() {
 				Equal(publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING))
 			Expect(after.GetObject().GetStatus().GetStateTransitionTime().AsTime()).To(
 				Equal(storedTime.AsTime()))
+			Expect(after.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-stored"))
+			Expect(after.GetObject().GetSpec().GetRestartRequestedAt().AsTime()).To(
+				BeTemporally("~", restartTime.AsTime()))
+			persisted, err := ciDao.Get().SetId(id).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
+				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 		})
 
 		It("Rejects changing network attachments via the public update path", func() {
@@ -1018,6 +1045,48 @@ var _ = Describe("Compute instances server", func() {
 			Entry("instance type transition time", "status.instance_type_transition_time"),
 			Entry("instance type name subpath", "status.instance_type.name"),
 			Entry("instance type transition time subpath", "status.instance_type_transition_time.seconds"),
+		)
+
+		DescribeTable("Rejects public updates of disk registration status fields",
+			func(path string) {
+				createTemplate("disk-status-update-template")
+
+				createResponse, err := server.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
+					Object: publicv1.ComputeInstance_builder{
+						Metadata: publicv1.Metadata_builder{Name: "disk-status-update"}.Build(),
+						Spec: publicv1.ComputeInstanceSpec_builder{
+							Template: publicv1.ComputeInstanceTemplateReference_builder{Id: "disk-status-update-template"}.Build(),
+							NetworkAttachments: []*publicv1.ComputeNetworkAttachment{
+								publicv1.ComputeNetworkAttachment_builder{
+									Subnet: publicv1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+								}.Build(),
+							},
+						}.Build(),
+					}.Build(),
+				}.Build())
+				Expect(err).ToNot(HaveOccurred())
+
+				_, err = server.Update(ctx, publicv1.ComputeInstancesUpdateRequest_builder{
+					Object: publicv1.ComputeInstance_builder{
+						Id: createResponse.GetObject().GetId(),
+						Status: publicv1.ComputeInstanceStatus_builder{
+							Volumes: []*publicv1.ComputeInstanceVolume{
+								publicv1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-spoofed"}.Build(),
+							},
+						}.Build(),
+					}.Build(),
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{path}},
+				}.Build())
+				Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
+				Expect(err.Error()).To(ContainSubstring(path + " is output-only"))
+			},
+			Entry("public correlation list", "status.volumes"),
+			Entry("public correlation subfield", "status.volumes.volume_id"),
+			Entry("public correlation JSON subfield", "status.volumes.volumeId"),
+			Entry("private registration list", "status.volume_registration"),
+			Entry("private registration subfield", "status.volume_registration.state"),
+			Entry("private registration JSON field", "status.volumeRegistration"),
+			Entry("private registration JSON subfield", "status.volumeRegistration.state"),
 		)
 	})
 })

@@ -739,6 +739,74 @@ var _ = Describe("Private compute instances server", func() {
 			Expect(object.GetStatus().GetState()).To(Equal(privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING))
 		})
 
+		It("preserves the latest status from the locked row for public-view updates", func() {
+			createTemplate("locked-status-update-template")
+			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Metadata: privatev1.Metadata_builder{Name: "locked-status-update"}.Build(),
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "locked-status-update-template"}.Build(),
+						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
+							privatev1.ComputeNetworkAttachment_builder{
+								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+							}.Build(),
+						},
+					}.Build(),
+					Status: privatev1.ComputeInstanceStatus_builder{
+						Volumes: []*privatev1.ComputeInstanceVolume{
+							privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-before"}.Build(),
+						},
+						VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+							privatev1.ComputeInstanceVolumeRegistration_builder{
+								DiskKey: "boot",
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
+							}.Build(),
+						},
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			id := createResponse.GetObject().GetId()
+
+			staleResponse, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			staleCandidate := proto.Clone(staleResponse.GetObject()).(*privatev1.ComputeInstance)
+
+			latestStatus := privatev1.ComputeInstanceStatus_builder{
+				Volumes: []*privatev1.ComputeInstanceVolume{
+					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-after"}.Build(),
+				},
+				VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+					privatev1.ComputeInstanceVolumeRegistration_builder{
+						DiskKey: "boot",
+						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+					}.Build(),
+				},
+			}.Build()
+			_, err = server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{Id: id, Status: latestStatus}.Build(),
+				UpdateMask: &fieldmaskpb.FieldMask{
+					Paths: []string{"status.volumes", "status.volume_registration"},
+				},
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+
+			staleCandidate.GetSpec().SetRestartRequestedAt(timestamppb.Now())
+			updateResponse, err := server.Update(withPublicAPIView(ctx), privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: staleCandidate,
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updateResponse.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-after"))
+			Expect(updateResponse.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
+				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+
+			persisted, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-after"))
+			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
+				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		})
+
 		It("Deletes object", func() {
 			// Create a template first
 			createTemplate("general.small")
