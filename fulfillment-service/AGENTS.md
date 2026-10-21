@@ -42,6 +42,10 @@ respective areas.
 - Public servers wrap private servers and add tenant/auth behavior; preserve that boundary.
 - Existing database migrations are immutable. Add a new numbered migration instead of changing an applied one.
 - Tenant authorization and attribution must remain enforced on every public resource path.
+- Fulfillment lifecycle code owns `ComputeInstance.status.volumes` and the private
+  `status.volume_registration` state. The public API exposes only the correlation
+  list, and public updates cannot mutate either field. Other lifecycle and
+  feedback writers preserve both fields through their update masks.
 
 ## Generated files
 

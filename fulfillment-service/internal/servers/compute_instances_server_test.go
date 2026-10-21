@@ -14,16 +14,23 @@ language governing permissions and limitations under the License.
 package servers
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/auth"
+	"github.com/osac-project/osac/fulfillment-service/internal/logging"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -700,6 +707,149 @@ var _ = Describe("Compute instances server", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
 				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		})
+
+		It("projects disk correlations without private registration state in responses and logs", func() {
+			createTemplate("public-disk-projection-template")
+			created, err := server.delegate.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Metadata: privatev1.Metadata_builder{Name: "public-disk-projection"}.Build(),
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
+						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
+							privatev1.ComputeNetworkAttachment_builder{
+								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+							}.Build(),
+						},
+					}.Build(),
+					Status: privatev1.ComputeInstanceStatus_builder{
+						Volumes: []*privatev1.ComputeInstanceVolume{
+							privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-public"}.Build(),
+						},
+						VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+							privatev1.ComputeInstanceVolumeRegistration_builder{
+								DiskKey: "boot",
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+							}.Build(),
+						},
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+
+			getRequest := publicv1.ComputeInstancesGetRequest_builder{Id: created.GetObject().GetId()}.Build()
+			getResponse, err := server.Get(ctx, getRequest)
+			Expect(err).ToNot(HaveOccurred())
+			publicJSON, err := protojson.Marshal(getResponse.GetObject())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(publicJSON)).To(ContainSubstring(`"volumeId":"volume-public"`))
+			Expect(string(publicJSON)).ToNot(ContainSubstring("volumeRegistration"))
+			Expect(string(publicJSON)).ToNot(ContainSubstring("STATE_RESOLVED"))
+
+			ownerGet, err := server.Get(ctx, getRequest)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ownerGet.GetObject().GetStatus().GetVolumes()).To(HaveLen(1))
+			Expect(ownerGet.GetObject().GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
+			Expect(ownerGet.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-public"))
+			ownerList, err := server.List(ctx, publicv1.ComputeInstancesListRequest_builder{}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			var listedInstance *publicv1.ComputeInstance
+			for _, item := range ownerList.GetItems() {
+				if item.GetId() == created.GetObject().GetId() {
+					listedInstance = item
+					break
+				}
+			}
+			Expect(listedInstance).ToNot(BeNil())
+			Expect(listedInstance.GetStatus().GetVolumes()).To(HaveLen(1))
+			Expect(listedInstance.GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
+			Expect(listedInstance.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-public"))
+
+			// A same-tenant caller with access to a different project cannot see this instance.
+			projectName := "hidden-disk-project"
+			projectsDao, err := dao.NewGenericDAO[*privatev1.Project]().
+				SetLogger(logger).
+				SetTenancyLogic(tenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			_, err = projectsDao.Create().SetObject(privatev1.Project_builder{
+				Id: projectName,
+				Metadata: privatev1.Metadata_builder{
+					Name:   projectName,
+					Tenant: testTenant,
+				}.Build(),
+			}.Build()).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			projectInstance, err := server.delegate.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Metadata: privatev1.Metadata_builder{
+						Name:    "project-scoped-disk-instance",
+						Project: projectName,
+					}.Build(),
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
+						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
+							privatev1.ComputeNetworkAttachment_builder{
+								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+							}.Build(),
+						},
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+
+			foreignVisibility, err := auth.NewVisibility().
+				AddVisibleTenant("other-tenant").
+				SetTotalProjectVisibility("other-tenant").
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			foreignTenancy := auth.NewMockTenancyLogic(ctrl)
+			foreignTenancy.EXPECT().DetermineVisibility(gomock.Any()).Return(foreignVisibility, nil).AnyTimes()
+			foreignServer, err := NewComputeInstancesServer().
+				SetLogger(logger).
+				SetAttributionLogic(attribution).
+				SetTenancyLogic(foreignTenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			_, err = foreignServer.Get(ctx, getRequest)
+			Expect(status.Code(err)).To(Equal(codes.NotFound))
+			foreignList, err := foreignServer.List(ctx, publicv1.ComputeInstancesListRequest_builder{}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(foreignList.GetItems()).To(BeEmpty())
+
+			projectVisibility, err := auth.NewVisibility().
+				AddVisibleProject(testTenant, "another-project").
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			projectTenancy := auth.NewMockTenancyLogic(ctrl)
+			projectTenancy.EXPECT().DetermineVisibility(gomock.Any()).Return(projectVisibility, nil).AnyTimes()
+			projectServer, err := NewComputeInstancesServer().
+				SetLogger(logger).
+				SetAttributionLogic(attribution).
+				SetTenancyLogic(projectTenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			projectGetRequest := publicv1.ComputeInstancesGetRequest_builder{Id: projectInstance.GetObject().GetId()}.Build()
+			_, err = projectServer.Get(ctx, projectGetRequest)
+			Expect(status.Code(err)).To(Equal(codes.NotFound))
+			projectList, err := projectServer.List(ctx, publicv1.ComputeInstancesListRequest_builder{}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(projectList.GetItems()).To(ContainElement(HaveField("Id", created.GetObject().GetId())))
+			Expect(projectList.GetItems()).ToNot(ContainElement(HaveField("Id", projectInstance.GetObject().GetId())))
+
+			var logOutput bytes.Buffer
+			debugLogger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			interceptor, err := logging.NewInterceptor().SetLogger(debugLogger).SetBodies(true).Build()
+			Expect(err).ToNot(HaveOccurred())
+			_, err = interceptor.UnaryServer(ctx, getRequest, &grpc.UnaryServerInfo{
+				FullMethod: "/osac.public.v1.ComputeInstances/Get",
+			}, func(callCtx context.Context, request any) (any, error) {
+				return server.Get(callCtx, request.(*publicv1.ComputeInstancesGetRequest))
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(logOutput.String()).To(ContainSubstring("volume-public"))
+			Expect(logOutput.String()).ToNot(ContainSubstring("volumeRegistration"))
+			Expect(logOutput.String()).ToNot(ContainSubstring("STATE_RESOLVED"))
 		})
 
 		It("Rejects changing network attachments via the public update path", func() {
