@@ -979,6 +979,69 @@ var _ = Describe("Private compute instances server", func() {
 			Expect(equalComputeInstanceDiskStatus(persisted.GetObject().GetStatus(), updateStatus)).To(BeTrue())
 		})
 
+		It("allows only one attempted disk claim for a persisted object version", func() {
+			created := createComputeInstanceWithStatus("single-disk-registration-claim", nil)
+			Expect(suiteTx.End(ctx)).To(Succeed())
+			suiteTx = nil
+
+			versionTx, err := tm.Begin(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			versionCtx := database.TxIntoContext(context.Background(), versionTx)
+			current, err := server.Get(versionCtx, privatev1.ComputeInstancesGetRequest_builder{Id: created.GetId()}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			staleVersion := current.GetObject().GetMetadata().GetVersion()
+			Expect(versionTx.End(context.Background())).To(Succeed())
+
+			staleClaim := privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Id: created.GetId(),
+					Metadata: privatev1.Metadata_builder{
+						Version: staleVersion,
+					}.Build(),
+					Status: privatev1.ComputeInstanceStatus_builder{
+						VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+							privatev1.ComputeInstanceVolumeRegistration_builder{
+								DiskKey: "boot",
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+							}.Build(),
+						},
+					}.Build(),
+				}.Build(),
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.volume_registration"}},
+				Lock:       true,
+			}.Build()
+
+			firstTx, err := tm.Begin(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			firstCtx := database.TxIntoContext(context.Background(), firstTx)
+			_, err = server.Update(firstCtx, staleClaim)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(firstTx.End(context.Background())).To(Succeed())
+
+			secondTx, err := tm.Begin(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			secondCtx := database.TxIntoContext(context.Background(), secondTx)
+			_, err = server.Update(secondCtx, staleClaim)
+			Expect(grpcstatus.Code(err)).To(Equal(grpccodes.Aborted))
+			Expect(secondTx.End(context.Background())).To(Succeed())
+
+			verifyTx, err := tm.Begin(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			verifyCtx := database.TxIntoContext(context.Background(), verifyTx)
+			DeferCleanup(func() {
+				Expect(verifyTx.End(verifyCtx)).To(Succeed())
+			})
+			persisted, err := server.Get(verifyCtx, privatev1.ComputeInstancesGetRequest_builder{Id: created.GetId()}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(
+				[]*privatev1.ComputeInstanceVolumeRegistration{
+					privatev1.ComputeInstanceVolumeRegistration_builder{
+						DiskKey: "boot",
+						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+					}.Build(),
+				}))
+		})
+
 		It("preserves both disk status lists across concurrent masked status updates", func() {
 			created := createComputeInstanceWithStatus("concurrent-disk-status", nil)
 			Expect(suiteTx.End(ctx)).To(Succeed())
