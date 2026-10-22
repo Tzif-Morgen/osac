@@ -790,22 +790,18 @@ var _ = Describe("Compute instances server", func() {
 				}.Build(),
 			}.Build()).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			projectInstance, err := server.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
-				Object: publicv1.ComputeInstance_builder{
-					Metadata: publicv1.Metadata_builder{
-						Name:    "project-scoped-disk-instance",
-						Project: projectName,
-					}.Build(),
-					Spec: publicv1.ComputeInstanceSpec_builder{
-						Template: publicv1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
-						NetworkAttachments: []*publicv1.ComputeNetworkAttachment{
-							publicv1.ComputeNetworkAttachment_builder{
-								Subnet: publicv1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
-							}.Build(),
-						},
+			projectInstance, err := ciDao.Create().SetObject(privatev1.ComputeInstance_builder{
+				Metadata: privatev1.Metadata_builder{
+					Name:    "project-scoped-disk-instance",
+					Tenant:  testTenant,
+					Project: projectName,
+				}.Build(),
+				Spec: privatev1.ComputeInstanceSpec_builder{
+					Template: privatev1.ComputeInstanceTemplateReference_builder{
+						Id: "public-disk-projection-template",
 					}.Build(),
 				}.Build(),
-			}.Build())
+			}.Build()).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			foreignVisibility, err := auth.NewVisibility().

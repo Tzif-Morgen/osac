@@ -1031,10 +1031,11 @@ var _ = Describe("Private compute instances server", func() {
 					Object: privatev1.ComputeInstance_builder{
 						Id: created.GetId(),
 						Status: privatev1.ComputeInstanceStatus_builder{
-							State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
+							State:               privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
+							StateTransitionTime: timestamppb.New(time.Now().Add(time.Minute)),
 						}.Build(),
 					}.Build(),
-					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.state"}},
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.state", "status.state_transition_time"}},
 				}.Build())
 				updateDone <- updateErr
 			}()
