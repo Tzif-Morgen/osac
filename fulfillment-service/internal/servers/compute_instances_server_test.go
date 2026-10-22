@@ -711,30 +711,40 @@ var _ = Describe("Compute instances server", func() {
 
 		It("projects disk correlations without private registration state in responses and logs", func() {
 			createTemplate("public-disk-projection-template")
-			created, err := server.delegate.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
-				Object: privatev1.ComputeInstance_builder{
-					Metadata: privatev1.Metadata_builder{Name: "public-disk-projection"}.Build(),
-					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
-						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
-							privatev1.ComputeNetworkAttachment_builder{
-								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
-							}.Build(),
-						},
-					}.Build(),
-					Status: privatev1.ComputeInstanceStatus_builder{
-						Volumes: []*privatev1.ComputeInstanceVolume{
-							privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-public"}.Build(),
-						},
-						VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
-							privatev1.ComputeInstanceVolumeRegistration_builder{
-								DiskKey: "boot",
-								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+			created, err := server.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
+				Object: publicv1.ComputeInstance_builder{
+					Metadata: publicv1.Metadata_builder{Name: "public-disk-projection"}.Build(),
+					Spec: publicv1.ComputeInstanceSpec_builder{
+						Template: publicv1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
+						NetworkAttachments: []*publicv1.ComputeNetworkAttachment{
+							publicv1.ComputeNetworkAttachment_builder{
+								Subnet: publicv1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
 							}.Build(),
 						},
 					}.Build(),
 				}.Build(),
 			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			ciDao, err := dao.NewGenericDAO[*privatev1.ComputeInstance]().
+				SetLogger(logger).
+				SetTenancyLogic(tenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+			stored, err := ciDao.Get().SetId(created.GetObject().GetId()).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			storedObject := stored.GetObject()
+			storedObject.SetStatus(privatev1.ComputeInstanceStatus_builder{
+				Volumes: []*privatev1.ComputeInstanceVolume{
+					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-public"}.Build(),
+				},
+				VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+					privatev1.ComputeInstanceVolumeRegistration_builder{
+						DiskKey: "boot",
+						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+					}.Build(),
+				},
+			}.Build())
+			_, err = ciDao.Update().SetObject(storedObject).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			getRequest := publicv1.ComputeInstancesGetRequest_builder{Id: created.GetObject().GetId()}.Build()
@@ -780,17 +790,17 @@ var _ = Describe("Compute instances server", func() {
 				}.Build(),
 			}.Build()).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			projectInstance, err := server.delegate.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
-				Object: privatev1.ComputeInstance_builder{
-					Metadata: privatev1.Metadata_builder{
+			projectInstance, err := server.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
+				Object: publicv1.ComputeInstance_builder{
+					Metadata: publicv1.Metadata_builder{
 						Name:    "project-scoped-disk-instance",
 						Project: projectName,
 					}.Build(),
-					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
-						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
-							privatev1.ComputeNetworkAttachment_builder{
-								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+					Spec: publicv1.ComputeInstanceSpec_builder{
+						Template: publicv1.ComputeInstanceTemplateReference_builder{Id: "public-disk-projection-template"}.Build(),
+						NetworkAttachments: []*publicv1.ComputeNetworkAttachment{
+							publicv1.ComputeNetworkAttachment_builder{
+								Subnet: publicv1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
 							}.Build(),
 						},
 					}.Build(),

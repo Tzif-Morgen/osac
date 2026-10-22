@@ -37,6 +37,18 @@ import (
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 )
 
+func equalComputeInstanceDiskStatus(actual, expected *privatev1.ComputeInstanceStatus) bool {
+	actualDiskStatus := privatev1.ComputeInstanceStatus_builder{
+		Volumes:            actual.GetVolumes(),
+		VolumeRegistration: actual.GetVolumeRegistration(),
+	}.Build()
+	expectedDiskStatus := privatev1.ComputeInstanceStatus_builder{
+		Volumes:            expected.GetVolumes(),
+		VolumeRegistration: expected.GetVolumeRegistration(),
+	}.Build()
+	return proto.Equal(actualDiskStatus, expectedDiskStatus)
+}
+
 var _ = Describe("Private compute instances server", func() {
 	var defaultTestNetworkClass *privatev1.NetworkClass
 
@@ -859,8 +871,13 @@ var _ = Describe("Private compute instances server", func() {
 				Expect(err).ToNot(HaveOccurred())
 				persisted, err := computeInstancesDao.Get().SetId(created.GetId()).Do(ctx)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(persisted.GetObject().GetStatus().GetVolumes()).To(Equal(volumes))
-				Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(registrations))
+				Expect(equalComputeInstanceDiskStatus(
+					persisted.GetObject().GetStatus(),
+					privatev1.ComputeInstanceStatus_builder{
+						Volumes:            volumes,
+						VolumeRegistration: registrations,
+					}.Build(),
+				)).To(BeTrue())
 			},
 			Entry("zero pairs", []*privatev1.ComputeInstanceVolume(nil), []*privatev1.ComputeInstanceVolumeRegistration(nil), 0),
 			Entry("partial pairs", []*privatev1.ComputeInstanceVolume{
@@ -916,8 +933,7 @@ var _ = Describe("Private compute instances server", func() {
 				Expect(err).ToNot(HaveOccurred())
 				persisted, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: created.GetId()}.Build())
 				Expect(err).ToNot(HaveOccurred())
-				Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(status.GetVolumeRegistration()))
-				Expect(persisted.GetObject().GetStatus().GetVolumes()).To(Equal(status.GetVolumes()))
+				Expect(equalComputeInstanceDiskStatus(persisted.GetObject().GetStatus(), status)).To(BeTrue())
 			},
 			Entry("never attempted", privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED, false),
 			Entry("confirmed non-committed failure", privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE, false),
@@ -958,8 +974,7 @@ var _ = Describe("Private compute instances server", func() {
 			Expect(err).ToNot(HaveOccurred())
 			persisted, err := computeInstancesDao.Get().SetId(created.GetId()).Do(verifyCtx)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(persisted.GetObject().GetStatus().GetVolumes()).To(Equal(updateStatus.GetVolumes()))
-			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(updateStatus.GetVolumeRegistration()))
+			Expect(equalComputeInstanceDiskStatus(persisted.GetObject().GetStatus(), updateStatus)).To(BeTrue())
 		})
 
 		It("preserves both disk status lists across concurrent masked status updates", func() {
@@ -1056,8 +1071,7 @@ var _ = Describe("Private compute instances server", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(persisted.GetObject().GetStatus().GetState()).To(
 				Equal(privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING))
-			Expect(persisted.GetObject().GetStatus().GetVolumes()).To(Equal(latestDiskStatus.GetVolumes()))
-			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(latestDiskStatus.GetVolumeRegistration()))
+			Expect(equalComputeInstanceDiskStatus(persisted.GetObject().GetStatus(), latestDiskStatus)).To(BeTrue())
 		})
 
 		It("reads legacy status JSON without disk registration fields", func() {
