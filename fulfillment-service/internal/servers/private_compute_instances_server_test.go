@@ -965,7 +965,9 @@ var _ = Describe("Private compute instances server", func() {
 			verifyTx, err := tm.Begin(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 			verifyCtx := database.TxIntoContext(context.Background(), verifyTx)
-			DeferCleanup(func() { _ = verifyTx.End(verifyCtx) })
+			DeferCleanup(func() {
+				Expect(verifyTx.End(verifyCtx)).To(Succeed())
+			})
 
 			computeInstancesDao, err := dao.NewGenericDAO[*privatev1.ComputeInstance]().
 				SetLogger(logger).
@@ -989,7 +991,7 @@ var _ = Describe("Private compute instances server", func() {
 			var updateDone chan error
 			DeferCleanup(func() {
 				if firstTx != nil {
-					_ = firstTx.End(context.Background())
+					Expect(firstTx.End(context.Background())).To(Succeed())
 					firstTx = nil
 				}
 				if updateDone != nil {
@@ -999,7 +1001,7 @@ var _ = Describe("Private compute instances server", func() {
 					}
 				}
 				if secondTx != nil {
-					_ = secondTx.End(context.Background())
+					Expect(secondTx.End(context.Background())).To(Succeed())
 					secondTx = nil
 				}
 			})
@@ -1067,7 +1069,9 @@ var _ = Describe("Private compute instances server", func() {
 			verifyTx, err := tm.Begin(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 			verifyCtx := database.TxIntoContext(context.Background(), verifyTx)
-			DeferCleanup(func() { _ = verifyTx.End(verifyCtx) })
+			DeferCleanup(func() {
+				Expect(verifyTx.End(verifyCtx)).To(Succeed())
+			})
 			persisted, err := server.Get(verifyCtx, privatev1.ComputeInstancesGetRequest_builder{Id: created.GetId()}.Build())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(persisted.GetObject().GetStatus().GetState()).To(
