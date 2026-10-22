@@ -88,6 +88,19 @@ service and database with the operator disabled, so it does not exercise Netris
 or AAP. The complete provider lifecycle belongs to the BMaaS E2E coverage in
 OSAC-4786.
 
+ComputeInstance Volume registration and recovery coverage is in
+[`it/it_compute_instance_volume_records_test.go`](it/it_compute_instance_volume_records_test.go)
+for [OSAC-6610](https://redhat.atlassian.net/browse/OSAC-6610). It uses the real
+private Volume and ComputeInstance APIs/PostgreSQL, with caller-side fault
+clients that lose a committed Create response or return an error after the
+attempted marker commits. It covers restart recovery and cancellation while a
+fixture finalizer holds the parent cleanup path. The test backend is controlled;
+it does not prove production provider behavior or the supported-tier matrix.
+The current cases also use the default empty project; named-project H5 coverage
+is still pending. Current LVMS validation requires node topology, which
+conflicts with the ComputeInstance request contract. Keep topology unset and
+report that compatibility failure instead of bypassing validation.
+
 ```bash
 export KUBECONFIG="$HOME/.kube/osac-dev-kind.kubeconfig"
 make -C ../osac-installer install-infra PLATFORM=kind PROFILE=dev NS=osac
