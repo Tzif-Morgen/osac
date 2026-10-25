@@ -1033,13 +1033,17 @@ var _ = Describe("Private compute instances server", func() {
 			})
 			persisted, err := server.Get(verifyCtx, privatev1.ComputeInstancesGetRequest_builder{Id: created.GetId()}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()).To(Equal(
-				[]*privatev1.ComputeInstanceVolumeRegistration{
-					privatev1.ComputeInstanceVolumeRegistration_builder{
-						DiskKey: "boot",
-						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
-					}.Build(),
-				}))
+			Expect(equalComputeInstanceDiskStatus(
+				persisted.GetObject().GetStatus(),
+				privatev1.ComputeInstanceStatus_builder{
+					VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
+						privatev1.ComputeInstanceVolumeRegistration_builder{
+							DiskKey: "boot",
+							State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+						}.Build(),
+					},
+				}.Build(),
+			)).To(BeTrue())
 		})
 
 		It("preserves both disk status lists across concurrent masked status updates", func() {
