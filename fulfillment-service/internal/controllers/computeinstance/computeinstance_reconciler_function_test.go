@@ -2344,7 +2344,7 @@ var _ = Describe("ensureUserDataSecret", func() {
 			computeInstance: privatev1.ComputeInstance_builder{
 				Id: ciID,
 				Spec: privatev1.ComputeInstanceSpec_builder{
-					UserData: new("#cloud-config\npackages:\n  - vim"),
+					UserDataSource: privatev1.UserDataSource_builder{Inline: new("#cloud-config\npackages:\n  - vim")}.Build(),
 				}.Build(),
 			}.Build(),
 			hubNamespace:       hubNamespace,
@@ -2393,7 +2393,7 @@ var _ = Describe("ensureUserDataSecret", func() {
 		t := &task{
 			r: &function{logger: logger, secretsClient: secretsClient},
 			computeInstance: privatev1.ComputeInstance_builder{Id: ciID, Spec: privatev1.ComputeInstanceSpec_builder{
-				UserDataSecret: privatev1.SecretLocalReference_builder{Id: "source-secret-id"}.Build(),
+				UserDataSource: privatev1.UserDataSource_builder{Secret: privatev1.SecretLocalReference_builder{Id: "source-secret-id"}.Build()}.Build(),
 			}.Build()}.Build(),
 			hubNamespace: hubNamespace, hubClient: fakeClient, userDataSecretName: ciID + userDataSecretSuffix,
 		}
@@ -2410,7 +2410,7 @@ var _ = Describe("ensureUserDataSecret", func() {
 			privatev1.SecretsGetResponse_builder{Object: privatev1.Secret_builder{Data: map[string][]byte{"other": []byte("value")}}.Build()}.Build(), nil)
 		t := &task{r: &function{logger: logger, secretsClient: secretsClient},
 			computeInstance: privatev1.ComputeInstance_builder{Spec: privatev1.ComputeInstanceSpec_builder{
-				UserDataSecret: privatev1.SecretLocalReference_builder{Id: "source-secret-id"}.Build(),
+				UserDataSource: privatev1.UserDataSource_builder{Secret: privatev1.SecretLocalReference_builder{Id: "source-secret-id"}.Build()}.Build(),
 			}.Build()}.Build(), userDataSecretName: ciID + userDataSecretSuffix}
 		Expect(t.ensureUserDataSecret(ctx, owner)).To(MatchError(ContainSubstring("missing non-empty data")))
 	})
@@ -2434,7 +2434,7 @@ var _ = Describe("ensureUserDataSecret", func() {
 			computeInstance: privatev1.ComputeInstance_builder{
 				Id: ciID,
 				Spec: privatev1.ComputeInstanceSpec_builder{
-					UserData: new("some-data"),
+					UserDataSource: privatev1.UserDataSource_builder{Inline: new("some-data")}.Build(),
 				}.Build(),
 			}.Build(),
 			hubNamespace:       hubNamespace,
@@ -2467,7 +2467,7 @@ var _ = Describe("ensureUserDataSecret", func() {
 			computeInstance: privatev1.ComputeInstance_builder{
 				Id: ciID,
 				Spec: privatev1.ComputeInstanceSpec_builder{
-					UserData: new("some-data"),
+					UserDataSource: privatev1.UserDataSource_builder{Inline: new("some-data")}.Build(),
 				}.Build(),
 			}.Build(),
 			hubNamespace:       hubNamespace,

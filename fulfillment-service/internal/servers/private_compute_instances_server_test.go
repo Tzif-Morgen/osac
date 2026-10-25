@@ -530,7 +530,7 @@ var _ = Describe("Private compute instances server", func() {
 					Metadata: privatev1.Metadata_builder{Name: fmt.Sprintf("test-%s", uuid.NewString()[:8])}.Build(),
 					Spec: privatev1.ComputeInstanceSpec_builder{
 						Template:       privatev1.ComputeInstanceTemplateReference_builder{Id: "secret-template"}.Build(),
-						UserDataSecret: privatev1.SecretLocalReference_builder{Name: secret.GetMetadata().GetName()}.Build(),
+						UserDataSource: privatev1.UserDataSource_builder{Secret: privatev1.SecretLocalReference_builder{Name: secret.GetMetadata().GetName()}.Build()}.Build(),
 						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
 							privatev1.ComputeNetworkAttachment_builder{
 								Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
@@ -540,8 +540,8 @@ var _ = Describe("Private compute instances server", func() {
 				}.Build(),
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(response.GetObject().GetSpec().GetUserDataSecret().GetId()).To(Equal(secret.GetId()))
-			Expect(response.GetObject().GetSpec().GetUserDataSecret().GetName()).To(Equal(secret.GetMetadata().GetName()))
+			Expect(response.GetObject().GetSpec().GetUserDataSource().GetSecret().GetId()).To(Equal(secret.GetId()))
+			Expect(response.GetObject().GetSpec().GetUserDataSource().GetSecret().GetName()).To(Equal(secret.GetMetadata().GetName()))
 		})
 
 		It("Creates object with additional disks", func() {
@@ -1990,7 +1990,7 @@ var _ = Describe("Private compute instances server", func() {
 						Metadata: privatev1.Metadata_builder{Name: fmt.Sprintf("test-%s", uuid.NewString()[:8])}.Build(),
 						Spec: privatev1.ComputeInstanceSpec_builder{
 							CatalogItem:    privatev1.ComputeInstanceCatalogItemReference_builder{Id: "ci-cat-secret"}.Build(),
-							UserDataSecret: privatev1.SecretLocalReference_builder{Name: secret.GetMetadata().GetName()}.Build(),
+							UserDataSource: privatev1.UserDataSource_builder{Secret: privatev1.SecretLocalReference_builder{Name: secret.GetMetadata().GetName()}.Build()}.Build(),
 							NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
 								privatev1.ComputeNetworkAttachment_builder{
 									Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
@@ -2000,29 +2000,47 @@ var _ = Describe("Private compute instances server", func() {
 					}.Build(),
 				}.Build())
 				Expect(err).ToNot(HaveOccurred())
-				Expect(response.GetObject().GetSpec().GetUserDataSecret().GetId()).To(Equal(secret.GetId()))
+				Expect(response.GetObject().GetSpec().GetUserDataSource().GetSecret().GetId()).To(Equal(secret.GetId()))
 				_, err = server.generic.dao.Get().SetId(response.GetObject().GetId()).Do(ctx)
 				Expect(err).To(HaveOccurred())
 			})
 
-			It("Rejects a user data Secret when a catalog policy supplies inline user data", func() {
-				userData := "#cloud-config"
-				createCICatalogItem("ci-cat-userdata", true, privatev1.ComputeInstanceCatalogItemFields_builder{
-					UserData: privatev1.StringFieldPolicy_builder{Locked: &userData}.Build(),
-				}.Build())
+			It("Applies the whole user data source catalog policy to caller Secrets", func() {
 				secret := createUserDataSecret()
+				for _, editable := range []bool{false, true} {
+					source := privatev1.UserDataSource_builder{Inline: new("#cloud-config")}.Build()
+					policy := privatev1.UserDataSourceFieldPolicy_builder{Locked: source}.Build()
+					if editable {
+						policy.SetEditable(privatev1.EditableUserDataSourceField_builder{DefaultValue: source}.Build())
+					}
+					catalogItemID := fmt.Sprintf("ci-cat-userdata-%t", editable)
+					createCICatalogItem(catalogItemID, true, privatev1.ComputeInstanceCatalogItemFields_builder{
+						UserDataSource: policy,
+					}.Build())
 
-				_, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
-					Object: privatev1.ComputeInstance_builder{
-						Metadata: privatev1.Metadata_builder{Name: fmt.Sprintf("test-%s", uuid.NewString()[:8])}.Build(),
-						Spec: privatev1.ComputeInstanceSpec_builder{
-							CatalogItem:    privatev1.ComputeInstanceCatalogItemReference_builder{Id: "ci-cat-userdata"}.Build(),
-							UserDataSecret: privatev1.SecretLocalReference_builder{Id: secret.GetId()}.Build(),
+					response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+						Object: privatev1.ComputeInstance_builder{
+							Metadata: privatev1.Metadata_builder{Name: fmt.Sprintf("test-%s", uuid.NewString()[:8])}.Build(),
+							Spec: privatev1.ComputeInstanceSpec_builder{
+								CatalogItem:    privatev1.ComputeInstanceCatalogItemReference_builder{Id: catalogItemID}.Build(),
+								UserDataSource: privatev1.UserDataSource_builder{Secret: privatev1.SecretLocalReference_builder{Id: secret.GetId()}.Build()}.Build(),
+								NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
+									privatev1.ComputeNetworkAttachment_builder{
+										Subnet: privatev1.SubnetLocalReference_builder{Id: "test-subnet"}.Build(),
+									}.Build(),
+								},
+							}.Build(),
 						}.Build(),
-					}.Build(),
-				}.Build())
-				Expect(grpcstatus.Code(err)).To(Equal(grpccodes.InvalidArgument))
-				Expect(err.Error()).To(ContainSubstring("user_data and user_data_secret are mutually exclusive"))
+					}.Build())
+					if !editable {
+						Expect(grpcstatus.Code(err)).To(Equal(grpccodes.InvalidArgument))
+						Expect(err.Error()).To(ContainSubstring("user_data_source: field is not editable"))
+						continue
+					}
+					Expect(err).ToNot(HaveOccurred())
+					Expect(response.GetObject().GetSpec().GetUserDataSource().GetSecret().GetId()).To(Equal(secret.GetId()))
+					Expect(response.GetObject().GetSpec().GetUserDataSource().HasInline()).To(BeFalse())
+				}
 			})
 
 			It("Creates compute instance with catalog item specified by name", func() {
@@ -5025,7 +5043,7 @@ var _ = Describe("Catalog materialized defaults", func() {
 		Entry("additional disk", true),
 	)
 
-	Describe("Windows user_data validation on update", func() {
+	Describe("Windows user_data_source.inline validation on update", func() {
 		var (
 			server   *PrivateComputeInstancesServer
 			subnetID string
@@ -5178,8 +5196,8 @@ var _ = Describe("Catalog materialized defaults", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("rejects invalid XML user_data on update for a Windows instance", func() {
-			// Create a Windows instance with valid XML user_data.
+		It("rejects invalid XML user_data_source.inline on update for a Windows instance", func() {
+			// Create a Windows instance with valid XML user_data_source.inline.
 			validXML := `<?xml version="1.0" encoding="utf-8"?><unattend><settings/></unattend>`
 			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
@@ -5187,8 +5205,8 @@ var _ = Describe("Catalog materialized defaults", func() {
 						Name: fmt.Sprintf("win-test-%s", uuid.NewString()[:8]),
 					}.Build(),
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
-						UserData: &validXML,
+						Template:       privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &validXML}.Build(),
 						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
 							privatev1.ComputeNetworkAttachment_builder{
 								Subnet: privatev1.SubnetLocalReference_builder{Id: subnetID}.Build(),
@@ -5200,17 +5218,17 @@ var _ = Describe("Catalog materialized defaults", func() {
 			Expect(err).ToNot(HaveOccurred())
 			id := createResponse.GetObject().GetId()
 
-			// Update with invalid XML user_data — should be rejected.
+			// Update with invalid XML user_data_source.inline — should be rejected.
 			invalidXML := "not xml at all"
 			_, err = server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						UserData: &invalidXML,
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &invalidXML}.Build(),
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.user_data"},
+					Paths: []string{"spec.user_data_source"},
 				},
 			}.Build())
 			Expect(err).To(HaveOccurred())
@@ -5220,8 +5238,8 @@ var _ = Describe("Catalog materialized defaults", func() {
 			Expect(st.Message()).To(ContainSubstring("not well-formed XML"))
 		})
 
-		It("accepts valid XML user_data on update for a Windows instance", func() {
-			// Create a Windows instance with valid XML user_data.
+		It("accepts valid XML user_data_source.inline on update for a Windows instance", func() {
+			// Create a Windows instance with valid XML user_data_source.inline.
 			validXML := `<?xml version="1.0" encoding="utf-8"?><unattend><settings/></unattend>`
 			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
@@ -5229,8 +5247,8 @@ var _ = Describe("Catalog materialized defaults", func() {
 						Name: fmt.Sprintf("win-test-%s", uuid.NewString()[:8]),
 					}.Build(),
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
-						UserData: &validXML,
+						Template:       privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &validXML}.Build(),
 						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
 							privatev1.ComputeNetworkAttachment_builder{
 								Subnet: privatev1.SubnetLocalReference_builder{Id: subnetID}.Build(),
@@ -5242,25 +5260,25 @@ var _ = Describe("Catalog materialized defaults", func() {
 			Expect(err).ToNot(HaveOccurred())
 			id := createResponse.GetObject().GetId()
 
-			// Update with valid XML user_data — should succeed.
+			// Update with valid XML user_data_source.inline — should succeed.
 			updatedXML := `<?xml version="1.0" encoding="utf-8"?><unattend><settings pass="oobeSystem"/></unattend>`
 			updateResponse, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						UserData: &updatedXML,
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &updatedXML}.Build(),
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.user_data"},
+					Paths: []string{"spec.user_data_source"},
 				},
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updateResponse.GetObject().GetSpec().GetUserData()).To(Equal(updatedXML))
+			Expect(updateResponse.GetObject().GetSpec().GetUserDataSource().GetInline()).To(Equal(updatedXML))
 		})
 
-		It("allows user_data update when the Windows disk image becomes OBSOLETE", func() {
-			// Create a Windows instance with valid XML user_data while the image is AVAILABLE.
+		It("allows user_data_source.inline update when the Windows disk image becomes OBSOLETE", func() {
+			// Create a Windows instance with valid XML user_data_source.inline while the image is AVAILABLE.
 			validXML := `<?xml version="1.0" encoding="utf-8"?><unattend><settings/></unattend>`
 			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
@@ -5268,8 +5286,8 @@ var _ = Describe("Catalog materialized defaults", func() {
 						Name: fmt.Sprintf("win-test-%s", uuid.NewString()[:8]),
 					}.Build(),
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
-						UserData: &validXML,
+						Template:       privatev1.ComputeInstanceTemplateReference_builder{Id: "win-template"}.Build(),
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &validXML}.Build(),
 						NetworkAttachments: []*privatev1.ComputeNetworkAttachment{
 							privatev1.ComputeNetworkAttachment_builder{
 								Subnet: privatev1.SubnetLocalReference_builder{Id: subnetID}.Build(),
@@ -5289,7 +5307,7 @@ var _ = Describe("Catalog materialized defaults", func() {
 			_, err = server.diskImagesDao.Update().SetObject(diskImage).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Updating user_data should succeed despite the OBSOLETE image; the
+			// Updating user_data_source.inline should succeed despite the OBSOLETE image; the
 			// update path resolves the image without lifecycle checks because
 			// disk_image is immutable.
 			updatedXML := `<?xml version="1.0" encoding="utf-8"?><unattend><settings pass="oobeSystem"/></unattend>`
@@ -5297,15 +5315,15 @@ var _ = Describe("Catalog materialized defaults", func() {
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						UserData: &updatedXML,
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &updatedXML}.Build(),
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.user_data"},
+					Paths: []string{"spec.user_data_source"},
 				},
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updateResponse.GetObject().GetSpec().GetUserData()).To(Equal(updatedXML))
+			Expect(updateResponse.GetObject().GetSpec().GetUserDataSource().GetInline()).To(Equal(updatedXML))
 
 			// XML validation still applies: invalid XML must still be rejected.
 			invalidXML := "this is not xml"
@@ -5313,11 +5331,11 @@ var _ = Describe("Catalog materialized defaults", func() {
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						UserData: &invalidXML,
+						UserDataSource: privatev1.UserDataSource_builder{Inline: &invalidXML}.Build(),
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.user_data"},
+					Paths: []string{"spec.user_data_source"},
 				},
 			}.Build())
 			Expect(err).To(HaveOccurred())
