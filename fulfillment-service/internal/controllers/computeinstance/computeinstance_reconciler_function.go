@@ -97,6 +97,7 @@ type function struct {
 	networkingHubReader         controllers.NetworkingHubReader
 	networkingCleanup           controllers.WorkloadNetworkingCleanup
 	computeInstancesClient      privatev1.ComputeInstancesClient
+	volumesClient               privatev1.VolumesClient
 	externalIPsClient           privatev1.ExternalIPsClient
 	externalIPAttachmentsClient privatev1.ExternalIPAttachmentsClient
 	hubsClient                  privatev1.HubsClient
@@ -159,6 +160,7 @@ func (b *FunctionBuilder) Build() (result controllers.ReconcilerFunction[*privat
 		logger:                      b.logger,
 		networkingCleanup:           controllers.NewWorkloadNetworkingCleanup(b.connection),
 		computeInstancesClient:      privatev1.NewComputeInstancesClient(b.connection),
+		volumesClient:               privatev1.NewVolumesClient(b.connection),
 		externalIPsClient:           privatev1.NewExternalIPsClient(b.connection),
 		externalIPAttachmentsClient: privatev1.NewExternalIPAttachmentsClient(b.connection),
 		hubsClient:                  privatev1.NewHubsClient(b.connection),
@@ -422,8 +424,7 @@ func (t *task) delete(ctx context.Context) (err error) {
 		if err = controllers.ReconcileWorkloadNetworkingCleanup(ctx, t.r.networkingCleanup, t.computeInstance.GetId()); err != nil {
 			return err
 		}
-		t.removeFinalizer()
-		return nil
+		return t.releaseFinalizerAfterVolumeCleanup(ctx, t.removeFinalizer)
 	}
 	err = t.getHub(ctx)
 	if err != nil {
@@ -432,8 +433,16 @@ func (t *task) delete(ctx context.Context) (err error) {
 			if err = controllers.ReconcileWorkloadNetworkingCleanup(ctx, t.r.networkingCleanup, t.computeInstance.GetId()); err != nil {
 				return err
 			}
-			controllers.RemoveFinalizerOnDecommissionedHub(ctx, t.r.logger, t.hubId, "compute_instance_id", t.computeInstance.GetId(), t.removeFinalizer)
-			return nil
+			return t.releaseFinalizerAfterVolumeCleanup(ctx, func() {
+				controllers.RemoveFinalizerOnDecommissionedHub(
+					ctx,
+					t.r.logger,
+					t.hubId,
+					"compute_instance_id",
+					t.computeInstance.GetId(),
+					t.removeFinalizer,
+				)
+			})
 		}
 		// For transient errors (network, timeout, etc.), continue retrying
 		return
@@ -455,8 +464,7 @@ func (t *task) delete(ctx context.Context) (err error) {
 		if err = controllers.ReconcileWorkloadNetworkingCleanup(ctx, t.r.networkingCleanup, t.computeInstance.GetId()); err != nil {
 			return err
 		}
-		t.removeFinalizer()
-		return
+		return t.releaseFinalizerAfterVolumeCleanup(ctx, t.removeFinalizer)
 	}
 
 	// Initiate K8s deletion if not already in progress:

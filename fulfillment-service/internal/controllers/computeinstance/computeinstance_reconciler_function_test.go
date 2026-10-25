@@ -660,6 +660,147 @@ func (f *fakeWorkloadNetworkingCleanup) Cleanup(_ context.Context, workloadID st
 	return f.complete, f.err
 }
 
+type volumeCleanupTestClient struct {
+	privatev1.VolumesClient
+	get            func(context.Context, *privatev1.VolumesGetRequest) (*privatev1.VolumesGetResponse, error)
+	delete         func(context.Context, *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error)
+	list           func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error)
+	getRequests    []*privatev1.VolumesGetRequest
+	deleteRequests []*privatev1.VolumesDeleteRequest
+	listRequests   []*privatev1.VolumesListRequest
+	createCalls    int
+}
+
+func (c *volumeCleanupTestClient) Get(
+	ctx context.Context,
+	request *privatev1.VolumesGetRequest,
+	_ ...grpc.CallOption,
+) (*privatev1.VolumesGetResponse, error) {
+	c.getRequests = append(c.getRequests, proto.Clone(request).(*privatev1.VolumesGetRequest))
+	if c.get == nil {
+		return nil, status.Error(codes.Unimplemented, "Get not configured")
+	}
+	return c.get(ctx, request)
+}
+
+func (c *volumeCleanupTestClient) Delete(
+	ctx context.Context,
+	request *privatev1.VolumesDeleteRequest,
+	_ ...grpc.CallOption,
+) (*privatev1.VolumesDeleteResponse, error) {
+	c.deleteRequests = append(c.deleteRequests, proto.Clone(request).(*privatev1.VolumesDeleteRequest))
+	if c.delete == nil {
+		return nil, status.Error(codes.Unimplemented, "Delete not configured")
+	}
+	return c.delete(ctx, request)
+}
+
+func (c *volumeCleanupTestClient) List(
+	ctx context.Context,
+	request *privatev1.VolumesListRequest,
+	_ ...grpc.CallOption,
+) (*privatev1.VolumesListResponse, error) {
+	c.listRequests = append(c.listRequests, proto.Clone(request).(*privatev1.VolumesListRequest))
+	if c.list == nil {
+		return registrationTestListResponse(nil, 0), nil
+	}
+	return c.list(ctx, request)
+}
+
+func (c *volumeCleanupTestClient) Create(
+	context.Context,
+	*privatev1.VolumesCreateRequest,
+	...grpc.CallOption,
+) (*privatev1.VolumesCreateResponse, error) {
+	c.createCalls++
+	return nil, status.Error(codes.Unimplemented, "Create must not run during deletion")
+}
+
+func newVolumeCleanupTask(
+	volumes []*privatev1.ComputeInstanceVolume,
+	registrations []*privatev1.ComputeInstanceVolumeRegistration,
+) (*task, *registrationComputeInstancesClient, *volumeCleanupTestClient) {
+	instance := diskRegistrationTestInstance()
+	instance.GetMetadata().SetFinalizers([]string{finalizers.Controller})
+	instance.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
+	instance.GetStatus().SetHub("")
+	instance.GetStatus().SetVolumes(volumes)
+	instance.GetStatus().SetVolumeRegistration(registrations)
+	computeInstancesClient := &registrationComputeInstancesClient{
+		object: proto.Clone(instance).(*privatev1.ComputeInstance),
+	}
+	volumesClient := &volumeCleanupTestClient{}
+	f := &function{
+		logger:                 logger,
+		computeInstancesClient: computeInstancesClient,
+		volumesClient:          volumesClient,
+		networkingCleanup:      &fakeWorkloadNetworkingCleanup{complete: true},
+	}
+	return &task{r: f, computeInstance: instance}, computeInstancesClient, volumesClient
+}
+
+func computeInstanceVolumesForTest(ids ...string) []*privatev1.ComputeInstanceVolume {
+	volumes := make([]*privatev1.ComputeInstanceVolume, 0, len(ids))
+	for index, id := range ids {
+		diskKey := "boot"
+		if index > 0 {
+			diskKey = fmt.Sprintf("disk-%d", index)
+		}
+		volumes = append(volumes, privatev1.ComputeInstanceVolume_builder{
+			DiskKey:  diskKey,
+			VolumeId: id,
+		}.Build())
+	}
+	return volumes
+}
+
+func volumeCleanupRecordForTest(instance *privatev1.ComputeInstance, id string, diskKeys ...string) *privatev1.Volume {
+	prepared, err := prepareDiskRegistrations(instance)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	diskKey := "boot"
+	if len(diskKeys) > 0 {
+		diskKey = diskKeys[0]
+	}
+	var request *privatev1.VolumesCreateRequest
+	for _, candidate := range prepared {
+		if candidate.diskKey == diskKey {
+			request = candidate.request
+			break
+		}
+	}
+	ExpectWithOffset(1, request).NotTo(BeNil())
+	volume := registrationTestVolume(request, id, "system")
+	volume.GetStatus().SetState(privatev1.VolumeState_VOLUME_STATE_AVAILABLE)
+	return volume
+}
+
+func volumeGetResponseForTest(volume *privatev1.Volume) *privatev1.VolumesGetResponse {
+	return privatev1.VolumesGetResponse_builder{Object: volume}.Build()
+}
+
+type volumeCleanupGetResult struct {
+	volume *privatev1.Volume
+	err    error
+}
+
+func volumeCleanupGetSequence(results ...volumeCleanupGetResult) func(
+	context.Context,
+	*privatev1.VolumesGetRequest,
+) (*privatev1.VolumesGetResponse, error) {
+	index := 0
+	return func(context.Context, *privatev1.VolumesGetRequest) (*privatev1.VolumesGetResponse, error) {
+		if index >= len(results) {
+			return nil, status.Error(codes.Internal, "unexpected Volume Get")
+		}
+		result := results[index]
+		index++
+		if result.err != nil {
+			return nil, result.err
+		}
+		return volumeGetResponseForTest(result.volume), nil
+	}
+}
+
 var _ = Describe("delete", func() {
 	const (
 		ciID         = "test-ci-delete-id"
@@ -677,6 +818,381 @@ var _ = Describe("delete", func() {
 		ctx = context.Background()
 		ctrl = gomock.NewController(GinkgoT())
 		DeferCleanup(ctrl.Finish)
+	})
+
+	DescribeTable("requires Get-confirmed absence on every existing finalizer release path",
+		func(path string) {
+			const volumeID = "volume-recorded"
+			t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+			volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{
+				err: status.Error(codes.NotFound, "Volume is absent"),
+			})
+
+			switch path {
+			case "no hub":
+			case "decommissioned hub":
+				t.computeInstance.GetStatus().SetHub(hubID)
+				t.r.hubCache = controllers.NewMockHubCache(ctrl)
+				t.r.hubCache.(*controllers.MockHubCache).EXPECT().
+					Get(gomock.Any(), hubID).
+					Return(nil, controllers.ErrHubNotFound)
+			case "missing Kubernetes object":
+				t.computeInstance.GetStatus().SetHub(hubID)
+				scheme := runtime.NewScheme()
+				Expect(osacv1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(corev1.AddToScheme(scheme)).To(Succeed())
+				fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+				hubCache := controllers.NewMockHubCache(ctrl)
+				hubCache.EXPECT().Get(gomock.Any(), hubID).Return(&controllers.HubEntry{
+					Namespace: hubNamespace,
+					Client:    fakeClient,
+				}, nil)
+				t.r.hubCache = hubCache
+			default:
+				Fail("unexpected finalizer release path")
+			}
+
+			Expect(t.delete(ctx)).To(Succeed())
+			Expect(hasFinalizer(t.computeInstance)).To(BeFalse())
+			Expect(volumesClient.getRequests).To(HaveLen(1))
+			Expect(volumesClient.getRequests[0].GetId()).To(Equal(volumeID))
+			Expect(volumesClient.deleteRequests).To(BeEmpty())
+			Expect(volumesClient.createCalls).To(BeZero())
+		},
+		Entry("no Hub", "no hub"),
+		Entry("decommissioned Hub", "decommissioned hub"),
+		Entry("missing Kubernetes object", "missing Kubernetes object"),
+	)
+
+	It("does not begin Volume cleanup while the Kubernetes ComputeInstance still exists", func() {
+		const volumeID = "volume-recorded"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		t.computeInstance.GetStatus().SetHub(hubID)
+
+		cr := newComputeInstanceCR(diskRegistrationTestID, hubNamespace, crName, nil)
+		scheme := runtime.NewScheme()
+		Expect(osacv1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		deleteCalled := false
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(cr).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(context.Context, clnt.WithWatch, clnt.Object, ...clnt.DeleteOption) error {
+					deleteCalled = true
+					return nil
+				},
+			}).
+			Build()
+		hubCache := controllers.NewMockHubCache(ctrl)
+		hubCache.EXPECT().Get(gomock.Any(), hubID).Return(&controllers.HubEntry{
+			Namespace: hubNamespace,
+			Client:    fakeClient,
+		}, nil)
+		t.r.hubCache = hubCache
+
+		Expect(t.delete(ctx)).To(Succeed())
+		Expect(deleteCalled).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(BeEmpty())
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
+	})
+
+	It("does not begin Volume cleanup while automatic networking resources are terminating", func() {
+		const volumeID = "volume-recorded"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		cleanup := &fakeWorkloadNetworkingCleanup{}
+		t.r.networkingCleanup = cleanup
+
+		err := t.delete(ctx)
+		Expect(err).To(HaveOccurred())
+		Expect(cleanup.calls).To(Equal(1))
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(BeEmpty())
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
+	})
+
+	It("deletes a recorded Volume and releases the parent only after Get returns NotFound", func() {
+		const volumeID = "volume-recorded"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		volume := volumeCleanupRecordForTest(t.computeInstance, volumeID)
+		deleting := proto.Clone(volume).(*privatev1.Volume)
+		deleting.GetStatus().SetState(privatev1.VolumeState_VOLUME_STATE_DELETING)
+		volumesClient.get = volumeCleanupGetSequence(
+			volumeCleanupGetResult{volume: volume},
+			volumeCleanupGetResult{volume: deleting},
+		)
+		volumesClient.delete = func(_ context.Context, request *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			Expect(request.GetId()).To(Equal(volumeID))
+			return privatev1.VolumesDeleteResponse_builder{}.Build(), nil
+		}
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(HaveLen(2))
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+		Expect(volumesClient.deleteRequests[0].GetId()).To(Equal(volumeID))
+		Expect(t.computeInstance.GetStatus().GetVolumes()).To(Equal(computeInstanceVolumesForTest(volumeID)))
+	})
+
+	DescribeTable("waits while a Volume record is already deleting or deleted",
+		func(state privatev1.VolumeState) {
+			const volumeID = "volume-recorded"
+			t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+			volume := volumeCleanupRecordForTest(t.computeInstance, volumeID)
+			volume.GetStatus().SetState(state)
+			volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{volume: volume})
+
+			err := t.delete(ctx)
+			Expect(controllers.IsRequeueable(err)).To(BeTrue())
+			Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+			Expect(volumesClient.deleteRequests).To(BeEmpty())
+		},
+		Entry("DELETING", privatev1.VolumeState_VOLUME_STATE_DELETING),
+		Entry("DELETED but still visible", privatev1.VolumeState_VOLUME_STATE_DELETED),
+	)
+
+	It("does not treat Delete NotFound as absence when the follow-up Get is inconclusive", func() {
+		const volumeID = "volume-recorded"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		volumesClient.get = volumeCleanupGetSequence(
+			volumeCleanupGetResult{volume: volumeCleanupRecordForTest(t.computeInstance, volumeID)},
+			volumeCleanupGetResult{err: status.Error(codes.Unavailable, "Get unavailable")},
+		)
+		volumesClient.delete = func(context.Context, *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			return nil, status.Error(codes.NotFound, "already absent")
+		}
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(HaveLen(2))
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+	})
+
+	It("requires Get NotFound for every recorded Volume ID", func() {
+		firstID, secondID := "volume-boot", "volume-disk-1"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(firstID, secondID), nil)
+		volumesClient.get = func(_ context.Context, request *privatev1.VolumesGetRequest) (*privatev1.VolumesGetResponse, error) {
+			if request.GetId() == firstID {
+				return nil, status.Error(codes.NotFound, "Volume is absent")
+			}
+			return volumeGetResponseForTest(volumeCleanupRecordForTest(t.computeInstance, secondID, "disk-1")), nil
+		}
+		volumesClient.delete = func(context.Context, *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			return privatev1.VolumesDeleteResponse_builder{}.Build(), nil
+		}
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(HaveLen(3))
+		Expect(volumesClient.getRequests[0].GetId()).To(Equal(firstID))
+		Expect(volumesClient.getRequests[1].GetId()).To(Equal(secondID))
+		Expect(volumesClient.getRequests[2].GetId()).To(Equal(secondID))
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+		Expect(t.computeInstance.GetStatus().GetVolumes()).To(HaveLen(2))
+		Expect(t.computeInstance.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(firstID))
+		Expect(t.computeInstance.GetStatus().GetVolumes()[1].GetVolumeId()).To(Equal(secondID))
+	})
+
+	It("releases only after Get reports every recorded Volume ID absent", func() {
+		firstID, secondID := "volume-boot", "volume-disk-1"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(firstID, secondID), nil)
+		volumesClient.get = func(_ context.Context, request *privatev1.VolumesGetRequest) (*privatev1.VolumesGetResponse, error) {
+			Expect(request.GetId()).To(BeElementOf(firstID, secondID))
+			return nil, status.Error(codes.NotFound, "Volume is absent")
+		}
+
+		Expect(t.delete(ctx)).To(Succeed())
+		Expect(hasFinalizer(t.computeInstance)).To(BeFalse())
+		Expect(volumesClient.getRequests).To(HaveLen(2))
+		Expect(volumesClient.getRequests[0].GetId()).To(Equal(firstID))
+		Expect(volumesClient.getRequests[1].GetId()).To(Equal(secondID))
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
+	})
+
+	It("retries a lost Delete response by checking the original ID before retrying", func() {
+		const volumeID = "volume-recorded"
+		t, computeInstancesClient, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{
+			volume: volumeCleanupRecordForTest(t.computeInstance, volumeID),
+		})
+		volumesClient.delete = func(context.Context, *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			return nil, status.Error(codes.Unavailable, "Delete response was lost")
+		}
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(t.computeInstance.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(volumeID))
+
+		volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{
+			err: status.Error(codes.NotFound, "Volume is absent"),
+		})
+		restarted := &task{
+			r:               t.r,
+			computeInstance: proto.Clone(computeInstancesClient.object).(*privatev1.ComputeInstance),
+		}
+		Expect(restarted.delete(ctx)).To(Succeed())
+		Expect(hasFinalizer(restarted.computeInstance)).To(BeFalse())
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+		Expect(volumesClient.getRequests[1].GetId()).To(Equal(volumeID))
+	})
+
+	DescribeTable("fails closed when Get returns a record outside the parent scope or attribution",
+		func(mutate func(*privatev1.Volume)) {
+			const volumeID = "volume-recorded"
+			t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+			volume := volumeCleanupRecordForTest(t.computeInstance, volumeID)
+			mutate(volume)
+			volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{volume: volume})
+
+			err := t.delete(ctx)
+			Expect(controllers.IsRequeueable(err)).To(BeTrue())
+			Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+			Expect(volumesClient.deleteRequests).To(BeEmpty())
+		},
+		Entry("foreign tenant", func(volume *privatev1.Volume) {
+			volume.GetMetadata().SetTenant("tenant-b")
+		}),
+		Entry("foreign project", func(volume *privatev1.Volume) {
+			volume.GetMetadata().SetProject("project-b")
+		}),
+		Entry("unexpected creator", func(volume *privatev1.Volume) {
+			volume.GetMetadata().SetCreator("tenant-user")
+		}),
+		Entry("name belongs to a different parent or disk", func(volume *privatev1.Volume) {
+			volume.GetMetadata().SetName("ci-another-parent-boot")
+		}),
+	)
+
+	DescribeTable("keeps the parent finalizer when Get is not authoritative",
+		func(code codes.Code) {
+			const volumeID = "volume-recorded"
+			t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+			volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{
+				err: status.Error(code, "Volume lookup failed"),
+			})
+
+			err := t.delete(ctx)
+			Expect(controllers.IsRequeueable(err)).To(BeTrue())
+			Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+			Expect(volumesClient.deleteRequests).To(BeEmpty())
+		},
+		Entry("authorization denied", codes.PermissionDenied),
+		Entry("service unavailable", codes.Unavailable),
+		Entry("deadline exceeded", codes.DeadlineExceeded),
+	)
+
+	It("keeps the parent finalizer when Delete is denied", func() {
+		const volumeID = "volume-recorded"
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(volumeID), nil)
+		volumesClient.get = volumeCleanupGetSequence(volumeCleanupGetResult{
+			volume: volumeCleanupRecordForTest(t.computeInstance, volumeID),
+		})
+		volumesClient.delete = func(context.Context, *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			return nil, status.Error(codes.PermissionDenied, "Delete denied")
+		}
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(HaveLen(1))
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+	})
+
+	DescribeTable("does not create or block on known non-committed cancellation states",
+		func(state privatev1.ComputeInstanceVolumeRegistration_State) {
+			t, _, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
+				privatev1.ComputeInstanceVolumeRegistration_builder{DiskKey: "boot", State: state}.Build(),
+			})
+
+			Expect(t.delete(ctx)).To(Succeed())
+			Expect(hasFinalizer(t.computeInstance)).To(BeFalse())
+			Expect(volumesClient.listRequests).To(BeEmpty())
+			Expect(volumesClient.getRequests).To(BeEmpty())
+			Expect(volumesClient.deleteRequests).To(BeEmpty())
+			Expect(volumesClient.createCalls).To(BeZero())
+		},
+		Entry("never attempted", privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED),
+		Entry("known non-commit", privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE),
+	)
+
+	It("preserves legacy deletion when registration state and recorded IDs are absent", func() {
+		t, _, volumesClient := newVolumeCleanupTask(nil, nil)
+
+		Expect(t.delete(ctx)).To(Succeed())
+		Expect(hasFinalizer(t.computeInstance)).To(BeFalse())
+		Expect(volumesClient.listRequests).To(BeEmpty())
+		Expect(volumesClient.getRequests).To(BeEmpty())
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
+		Expect(volumesClient.createCalls).To(BeZero())
+	})
+
+	It("fails closed on an empty persisted Volume ID", func() {
+		t, _, volumesClient := newVolumeCleanupTask(computeInstanceVolumesForTest(""), nil)
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.getRequests).To(BeEmpty())
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
+	})
+
+	It("recovers and deletes the original uncertain registration without creating a replacement", func() {
+		const recoveredID = "volume-original"
+		t, computeInstancesClient, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "boot",
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+			}.Build(),
+		})
+		prepared, err := prepareDiskRegistrations(t.computeInstance)
+		Expect(err).NotTo(HaveOccurred())
+		recovered := registrationTestVolume(prepared[0].request, recoveredID, "system")
+		recovered.GetStatus().SetState(privatev1.VolumeState_VOLUME_STATE_AVAILABLE)
+		volumesClient.list = func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return registrationTestListResponse([]*privatev1.Volume{recovered}, 1), nil
+		}
+		volumesClient.get = volumeCleanupGetSequence(
+			volumeCleanupGetResult{volume: recovered},
+			volumeCleanupGetResult{err: status.Error(codes.NotFound, "Volume is absent")},
+		)
+		volumesClient.delete = func(_ context.Context, request *privatev1.VolumesDeleteRequest) (*privatev1.VolumesDeleteResponse, error) {
+			Expect(request.GetId()).To(Equal(recoveredID))
+			return privatev1.VolumesDeleteResponse_builder{}.Build(), nil
+		}
+
+		Expect(t.delete(ctx)).To(Succeed())
+		Expect(hasFinalizer(t.computeInstance)).To(BeFalse())
+		Expect(computeInstancesClient.object.GetStatus().GetVolumes()).To(HaveLen(1))
+		Expect(computeInstancesClient.object.GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
+		Expect(computeInstancesClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(recoveredID))
+		Expect(computeInstancesClient.object.GetStatus().GetVolumeRegistration()[0].GetState()).To(
+			Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		Expect(volumesClient.createCalls).To(BeZero())
+		Expect(volumesClient.listRequests).To(HaveLen(1))
+		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+	})
+
+	It("retains an uncertain registration when recovery finds no record", func() {
+		t, _, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "boot",
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+			}.Build(),
+		})
+
+		err := t.delete(ctx)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
+		Expect(volumesClient.listRequests).To(HaveLen(1))
+		Expect(volumesClient.createCalls).To(BeZero())
+		Expect(volumesClient.getRequests).To(BeEmpty())
+		Expect(t.computeInstance.GetStatus().GetVolumeRegistration()[0].GetState()).To(
+			Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
 	})
 
 	It("should remove finalizer when K8s object doesn't exist", func() {
@@ -2463,7 +2979,7 @@ var _ = Describe("hub persistence", func() {
 			}.Build(),
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "disk-1",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE,
 			}.Build(),
 		}
 		computeInstancesClient := NewMockComputeInstancesClient(ctrl)
@@ -2494,7 +3010,12 @@ var _ = Describe("hub persistence", func() {
 		f := &function{
 			logger:                 logger,
 			computeInstancesClient: computeInstancesClient,
-			networkingCleanup:      &fakeWorkloadNetworkingCleanup{complete: true},
+			volumesClient: &volumeCleanupTestClient{
+				get: volumeCleanupGetSequence(volumeCleanupGetResult{
+					err: status.Error(codes.NotFound, "Volume is absent"),
+				}),
+			},
+			networkingCleanup: &fakeWorkloadNetworkingCleanup{complete: true},
 		}
 
 		Expect(f.run(ctx, computeInstance)).To(Succeed())
