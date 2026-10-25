@@ -44,7 +44,6 @@ const diskRegistrationKubeHoldFinalizer = "osac-test.osac.io/hold-compute-instan
 
 var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	var (
-		ctx                 context.Context
 		network             catalogItemNetworkFixture
 		templateID          string
 		computeInstances    privatev1.ComputeInstancesClient
@@ -53,8 +52,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		computeInstanceSpec *publicv1.ComputeInstanceSpec
 	)
 
-	BeforeEach(func(testCtx context.Context) {
-		ctx = testCtx
+	// Ginkgo cancels this context when BeforeEach returns; each It uses its own.
+	BeforeEach(func(ctx context.Context) {
 		network = createCatalogItemNetworkFixture(ctx, usersGroup, "")
 		instanceTypeID := createCatalogItemComputeInstanceTypeFixture(ctx)
 		diskImage := createCatalogItemDiskImageFixture(ctx, "shared", catalogItemFixtureName())
@@ -80,7 +79,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		}.Build()
 	})
 
-	It("recovers the original record after a committed Create response is lost", func() {
+	It("recovers the original record after a committed Create response is lost", func(ctx context.Context) {
 		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
 		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
@@ -149,7 +148,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(after.GetItems()[0].GetId()).To(Equal(committedID))
 	})
 
-	It("recovers a matching same-name record through real API uniqueness", func() {
+	It("recovers a matching same-name record through real API uniqueness", func(ctx context.Context) {
 		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
 		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
@@ -181,7 +180,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(all.GetTotal()).To(Equal(int32(1)))
 	})
 
-	It("does not adopt a conflicting same-name record from the real API", func() {
+	It("does not adopt a conflicting same-name record from the real API", func(ctx context.Context) {
 		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
 		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
@@ -215,7 +214,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(all.GetItems()[0].GetId()).To(Equal(existing.GetObject().GetId()))
 	})
 
-	It("allows only one concurrent reconciler to dispatch a same-name Create", func() {
+	It("allows only one concurrent reconciler to dispatch a same-name Create", func(ctx context.Context) {
 		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
 		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
@@ -297,7 +296,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(persisted.GetStatus().GetVolumes()).To(HaveLen(1))
 	})
 
-	It("keeps a committed attempted marker blocked after a pre-call interruption", func() {
+	It("keeps a committed attempted marker blocked after a pre-call interruption", func(ctx context.Context) {
 		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
 		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
