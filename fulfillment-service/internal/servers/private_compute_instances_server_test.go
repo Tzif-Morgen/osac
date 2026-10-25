@@ -812,6 +812,18 @@ var _ = Describe("Private compute instances server", func() {
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
 			id := createResponse.GetObject().GetId()
+			_, err = server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Id: id,
+					Metadata: privatev1.Metadata_builder{
+						Version:    createResponse.GetObject().GetMetadata().GetVersion(),
+						Finalizers: []string{finalizers.Controller},
+					}.Build(),
+				}.Build(),
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"metadata.finalizers"}},
+				Lock:       true,
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
 
 			staleResponse, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
 			Expect(err).ToNot(HaveOccurred())
@@ -819,7 +831,10 @@ var _ = Describe("Private compute instances server", func() {
 
 			latestStatus := privatev1.ComputeInstanceStatus_builder{
 				Volumes: []*privatev1.ComputeInstanceVolume{
-					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-after"}.Build(),
+					privatev1.ComputeInstanceVolume_builder{
+						DiskKey:  "boot",
+						VolumeId: "volume-after-0123456789abcdef-0123456789abcdef0123456789abcdef",
+					}.Build(),
 				},
 				VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
 					privatev1.ComputeInstanceVolumeRegistration_builder{
@@ -841,15 +856,25 @@ var _ = Describe("Private compute instances server", func() {
 				Object: staleCandidate,
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updateResponse.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-after"))
+			Expect(updateResponse.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(
+				Equal("volume-after-0123456789abcdef-0123456789abcdef0123456789abcdef"))
 			Expect(updateResponse.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
 				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 
-			persisted, err := server.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+			restartedServer, err := NewPrivateComputeInstancesServer().
+				SetLogger(logger).
+				SetAttributionLogic(attribution).
+				SetTenancyLogic(tenancy).
+				Build()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(persisted.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-after"))
+			persisted, err := restartedServer.Get(ctx, privatev1.ComputeInstancesGetRequest_builder{Id: id}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.GetObject().GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
+			Expect(persisted.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(
+				Equal("volume-after-0123456789abcdef-0123456789abcdef0123456789abcdef"))
 			Expect(persisted.GetObject().GetStatus().GetVolumeRegistration()[0].GetState()).To(
 				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+			Expect(persisted.GetObject().GetSpec().GetTemplate().GetId()).To(Equal("locked-status-update-template"))
 		})
 
 		DescribeTable("round-trips empty, partial, and complete disk correlation lists",

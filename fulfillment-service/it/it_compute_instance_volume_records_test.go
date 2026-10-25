@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/controllers/computeinstance"
 	"github.com/osac-project/osac/fulfillment-service/internal/controllers/finalizers"
@@ -41,6 +42,7 @@ import (
 )
 
 const diskRegistrationKubeHoldFinalizer = "osac-test.osac.io/hold-compute-instance-cleanup"
+const diskRegistrationVolumeHoldFinalizer = "osac-test.osac.io/hold-volume-record-cleanup"
 
 var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	var (
@@ -381,6 +383,64 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(diskRegistrationState(cancelled, "boot")).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
 	})
+
+	It("retains the parent until its saved Volume ID is confirmed absent", func(ctx context.Context) {
+		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
+		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+
+		var volumeID string
+		Eventually(func(g Gomega) {
+			parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(parent.GetStatus().GetVolumes()).To(HaveLen(1))
+			g.Expect(diskRegistrationState(parent, "boot")).To(Equal(
+				privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+			volumeID = parent.GetStatus().GetVolumes()[0].GetVolumeId()
+			g.Expect(volumeID).NotTo(BeEmpty())
+		}, time.Minute, time.Second).Should(Succeed())
+
+		volumeResponse, err := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: volumeID}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(volumeResponse.GetObject().GetMetadata().GetCreator()).To(Equal("system"))
+		DeferCleanup(func(cleanupCtx context.Context) {
+			setDiskRegistrationVolumeHoldFinalizer(cleanupCtx, volumes, volumeID, false)
+		})
+		setDiskRegistrationVolumeHoldFinalizer(ctx, volumes, volumeID, true)
+
+		publicInstances := publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
+		_, err = publicInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: instance.GetId()}.Build())
+		Expect(err).NotTo(HaveOccurred())
+
+		By("holding the Volume record visible after the cleanup controller requests Delete")
+		assertParentAndVolumePresent := func(g Gomega) {
+			parent, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(parent.GetMetadata().HasDeletionTimestamp()).To(BeTrue())
+			g.Expect(parent.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
+			g.Expect(parent.GetStatus().GetVolumes()).To(HaveLen(1))
+			g.Expect(parent.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(volumeID))
+
+			visible, volumeErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: volumeID}.Build())
+			g.Expect(volumeErr).NotTo(HaveOccurred())
+			g.Expect(visible.GetObject().GetMetadata().HasDeletionTimestamp()).To(BeTrue())
+			g.Expect(visible.GetObject().GetMetadata().GetFinalizers()).To(
+				ContainElement(diskRegistrationVolumeHoldFinalizer))
+		}
+		Eventually(assertParentAndVolumePresent, 2*time.Minute, time.Second).Should(Succeed())
+		Consistently(assertParentAndVolumePresent, 5*time.Second, 250*time.Millisecond).Should(Succeed())
+
+		By("releasing the fixture finalizer and waiting for record and parent removal")
+		setDiskRegistrationVolumeHoldFinalizer(ctx, volumes, volumeID, false)
+		Eventually(func(g Gomega) {
+			_, getErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: volumeID}.Build())
+			g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+		}, 2*time.Minute, time.Second).Should(Succeed())
+		Eventually(func(g Gomega) {
+			_, getErr := computeInstances.Get(ctx,
+				privatev1.ComputeInstancesGetRequest_builder{Id: instance.GetId()}.Build())
+			g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+		}, 2*time.Minute, time.Second).Should(Succeed())
+	})
 })
 
 func createDiskRegistrationAPIContractInstance(ctx context.Context, spec *publicv1.ComputeInstanceSpec) *publicv1.ComputeInstance {
@@ -421,6 +481,50 @@ func getDiskRegistrationComputeInstance(ctx context.Context, client privatev1.Co
 		return nil, err
 	}
 	return response.GetObject(), nil
+}
+
+func setDiskRegistrationVolumeHoldFinalizer(
+	ctx context.Context,
+	client privatev1.VolumesClient,
+	id string,
+	hold bool,
+) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) bool {
+		response, err := client.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+		if !hold && status.Code(err) == codes.NotFound {
+			return true
+		}
+		g.Expect(err).NotTo(HaveOccurred())
+		object := response.GetObject()
+		current := object.GetMetadata().GetFinalizers()
+		present := slices.Contains(current, diskRegistrationVolumeHoldFinalizer)
+		if present == hold {
+			if !hold {
+				_, signalErr := client.Signal(ctx, privatev1.VolumesSignalRequest_builder{Id: id}.Build())
+				g.Expect(signalErr == nil || status.Code(signalErr) == codes.NotFound).To(BeTrue())
+			}
+			return true
+		}
+		finalizers := slices.DeleteFunc(slices.Clone(current), func(value string) bool {
+			return value == diskRegistrationVolumeHoldFinalizer
+		})
+		if hold {
+			finalizers = append(finalizers, diskRegistrationVolumeHoldFinalizer)
+		}
+		object.GetMetadata().SetFinalizers(finalizers)
+		_, err = client.Update(ctx, privatev1.VolumesUpdateRequest_builder{
+			Object:     object,
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"metadata.finalizers"}},
+			Lock:       true,
+		}.Build())
+		g.Expect(err).NotTo(HaveOccurred())
+		if !hold {
+			_, signalErr := client.Signal(ctx, privatev1.VolumesSignalRequest_builder{Id: id}.Build())
+			g.Expect(signalErr == nil || status.Code(signalErr) == codes.NotFound).To(BeTrue())
+		}
+		return true
+	}, time.Minute, 100*time.Millisecond).Should(BeTrue())
 }
 
 func diskRegistrationState(instance *privatev1.ComputeInstance, diskKey string) privatev1.ComputeInstanceVolumeRegistration_State {

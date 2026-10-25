@@ -101,6 +101,19 @@ is still pending. Current LVMS validation requires node topology, which
 conflicts with the ComputeInstance request contract. Keep topology unset and
 report that compatibility failure instead of bypassing validation.
 
+The [OSAC-6611](https://redhat.atlassian.net/browse/OSAC-6611) cleanup gate is
+covered at three Fulfillment tiers: controller unit tests exercise Delete/Get
+ordering and denied, inconclusive, and mismatched-record outcomes with
+controlled clients; the PostgreSQL server test verifies that a newly built
+server reads the committed finalizer and disk state; and the H5 API test holds
+a real Volume API record visible after Delete with a fixture-owned finalizer.
+The H5 test waits for Volume Get NotFound before parent removal. It uses the
+controlled test backend with the operator disabled and makes no provider or
+physical-storage claim. Pending cleanup logs include the ComputeInstance ID,
+disk key or Volume ID, and pending reason; they omit request payloads and
+credentials. Deployed workload ordering remains QE coverage tracked by
+[OSAC-6040](https://redhat.atlassian.net/browse/OSAC-6040).
+
 ```bash
 export KUBECONFIG="$HOME/.kube/osac-dev-kind.kubeconfig"
 make -C ../osac-installer install-infra PLATFORM=kind PROFILE=dev NS=osac
