@@ -1079,6 +1079,9 @@ func (t *task) buildSpecNetworkAttachments(ctx context.Context, spec *osacv1alph
 
 func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.ComputeInstanceSpec) error {
 	ciSpec := t.computeInstance.GetSpec()
+	if err := t.addDiskVolumeIDs(spec); err != nil {
+		return err
+	}
 
 	instanceTypeRef := ciSpec.GetInstanceType()
 	if instanceTypeRef == nil {
@@ -1183,6 +1186,26 @@ func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.Compute
 		spec.AdditionalDisks = operatorDisks
 	}
 
+	return nil
+}
+
+func (t *task) addDiskVolumeIDs(spec *osacv1alpha1.ComputeInstanceSpec) error {
+	volumes, err := diskVolumesByKey(t.computeInstance.GetStatus().GetVolumes())
+	if err != nil {
+		return err
+	}
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	diskVolumeIDs := make(map[string]string, len(volumes))
+	for key, volume := range volumes {
+		if volume.GetVolumeId() == "" {
+			return fmt.Errorf("ComputeInstance '%s' disk '%s' has an empty persisted Volume ID", t.computeInstance.GetId(), key)
+		}
+		diskVolumeIDs[key] = volume.GetVolumeId()
+	}
+	spec.DiskVolumeIDs = diskVolumeIDs
 	return nil
 }
 

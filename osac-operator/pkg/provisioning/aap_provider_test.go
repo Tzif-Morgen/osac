@@ -87,6 +87,7 @@ var _ = Describe("AAPProvider", func() {
 		provider  *provisioning.AAPProvider
 		aapClient *mockAAPClient
 		ctx       context.Context
+		launches  int
 	)
 
 	BeforeEach(func() {
@@ -97,11 +98,13 @@ var _ = Describe("AAPProvider", func() {
 	Describe("TriggerProvision", func() {
 		Context("with job template", func() {
 			BeforeEach(func() {
+				launches = 0
 				provider = provisioning.NewAAPProvider(aapClient, "provision-job", "deprovision-job")
 				aapClient.getTemplateFunc = func(ctx context.Context, templateName string) (*aap.Template, error) {
 					return &aap.Template{ID: 1, Name: templateName, Type: aap.TemplateTypeJob}, nil
 				}
 				aapClient.launchJobTemplateFunc = func(ctx context.Context, req aap.LaunchJobTemplateRequest) (*aap.LaunchJobTemplateResponse, error) {
+					launches++
 					Expect(req.TemplateName).To(Equal("provision-job"))
 					Expect(req.ExtraVars).To(HaveKey("osac_job_vars"))
 					payload := extractJobVarsResource(req.ExtraVars)
@@ -110,15 +113,26 @@ var _ = Describe("AAPProvider", func() {
 					metadata := payload["metadata"].(map[string]any)
 					Expect(metadata).To(HaveKeyWithValue("name", "test-resource"))
 					Expect(metadata).To(HaveKeyWithValue("namespace", "default"))
+					spec := payload["spec"].(map[string]any)
+					Expect(spec["diskVolumeIDs"]).To(Equal(map[string]any{
+						"boot":   "volume-boot",
+						"disk-1": "volume-data-1",
+					}))
 					return &aap.LaunchJobTemplateResponse{JobID: 123}, nil
 				}
 			})
 
-			It("should launch job template and return job ID", func() {
+			It("reuses the same disk IDs on a retried job launch", func() {
 				instance := &v1alpha1.ComputeInstance{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-resource",
 						Namespace: "default",
+					},
+					Spec: v1alpha1.ComputeInstanceSpec{
+						DiskVolumeIDs: map[string]string{
+							"boot":   "volume-boot",
+							"disk-1": "volume-data-1",
+						},
 					},
 				}
 				result, err := provider.TriggerProvision(ctx, instance)
@@ -126,6 +140,11 @@ var _ = Describe("AAPProvider", func() {
 				Expect(result.JobID).To(Equal("123"))
 				Expect(result.InitialState).To(Equal(v1alpha1.JobStatePending))
 				Expect(result.Message).To(Equal("Provisioning job triggered"))
+
+				result, err = provider.TriggerProvision(ctx, instance)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.JobID).To(Equal("123"))
+				Expect(launches).To(Equal(2))
 			})
 		})
 

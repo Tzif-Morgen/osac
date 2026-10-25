@@ -600,6 +600,117 @@ var _ = Describe("registered SSH key resolution", func() {
 	)
 })
 
+var _ = Describe("disk Volume ID handoff", func() {
+	newTask := func(
+		ctrl *gomock.Controller,
+		volumes []*privatev1.ComputeInstanceVolume,
+		registrations []*privatev1.ComputeInstanceVolumeRegistration,
+		additionalDiskCount int,
+	) *task {
+		additionalDisks := make([]*privatev1.ComputeInstanceDisk, additionalDiskCount)
+		for index := range additionalDisks {
+			additionalDisks[index] = privatev1.ComputeInstanceDisk_builder{
+				SizeGib: proto.Int32(int32(40 + index*20)),
+			}.Build()
+		}
+		instanceTypesClient := NewMockInstanceTypesClient(ctrl)
+		instanceTypesClient.EXPECT().
+			Get(gomock.Any(), gomock.Any()).
+			AnyTimes().
+			Return(privatev1.InstanceTypesGetResponse_builder{
+				Object: privatev1.InstanceType_builder{}.Build(),
+			}.Build(), nil)
+
+		return &task{
+			r: &function{
+				logger:              logger,
+				instanceTypesClient: instanceTypesClient,
+			},
+			computeInstance: privatev1.ComputeInstance_builder{
+				Id: "test-volume-id-handoff",
+				Spec: privatev1.ComputeInstanceSpec_builder{
+					InstanceType: &privatev1.InstanceTypeReference{Id: "type-id"},
+					BootDisk: privatev1.ComputeInstanceDisk_builder{
+						SizeGib:     proto.Int32(20),
+						StorageTier: privatev1.StorageTierReference_builder{Name: "fast"}.Build(),
+					}.Build(),
+					AdditionalDisks: privatev1.ComputeInstanceDiskList_builder{Items: additionalDisks}.Build(),
+				}.Build(),
+				Status: privatev1.ComputeInstanceStatus_builder{
+					Volumes:            volumes,
+					VolumeRegistration: registrations,
+				}.Build(),
+			}.Build(),
+		}
+	}
+
+	It("maps persisted IDs by disk key regardless of status order", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		t := newTask(ctrl, []*privatev1.ComputeInstanceVolume{
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "disk-2", VolumeId: "volume-2"}.Build(),
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-boot"}.Build(),
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "disk-1", VolumeId: "volume-1"}.Build(),
+		}, nil, 2)
+
+		want := map[string]string{
+			"boot":   "volume-boot",
+			"disk-1": "volume-1",
+			"disk-2": "volume-2",
+		}
+		for range 2 {
+			spec, err := t.buildSpecWithNetworkAttachments(context.Background(), false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(spec.DiskVolumeIDs).To(Equal(want))
+		}
+	})
+
+	It("copies only durable disk IDs while registration is incomplete", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		t := newTask(ctrl, []*privatev1.ComputeInstanceVolume{
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-boot"}.Build(),
+		}, []*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "boot",
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+			}.Build(),
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "disk-1",
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+			}.Build(),
+		}, 1)
+
+		spec, err := t.buildSpecWithNetworkAttachments(context.Background(), false)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spec.DiskVolumeIDs).To(Equal(map[string]string{
+			"boot": "volume-boot",
+		}))
+
+		t.computeInstance.GetStatus().SetVolumes(append(
+			t.computeInstance.GetStatus().GetVolumes(),
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "disk-1", VolumeId: "volume-1"}.Build(),
+		))
+		spec, err = t.buildSpecWithNetworkAttachments(context.Background(), false)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spec.DiskVolumeIDs).To(Equal(map[string]string{
+			"boot":   "volume-boot",
+			"disk-1": "volume-1",
+		}))
+	})
+
+	It("rejects a persisted disk entry without a Volume ID", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		t := newTask(ctrl, []*privatev1.ComputeInstanceVolume{
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "boot"}.Build(),
+		}, nil, 0)
+
+		_, err := t.buildSpecWithNetworkAttachments(context.Background(), false)
+		Expect(err).To(MatchError(ContainSubstring("empty persisted Volume ID")))
+	})
+})
+
 // newComputeInstanceCR creates a typed ComputeInstance CR for use with the fake client.
 func newComputeInstanceCR(id, namespace, name string, deletionTimestamp *metav1.Time) *osacv1alpha1.ComputeInstance {
 	obj := &osacv1alpha1.ComputeInstance{
@@ -2847,6 +2958,10 @@ var _ = Describe("hub persistence", func() {
 			}.Build(),
 			Spec: privatev1.ComputeInstanceSpec_builder{
 				InstanceType: &privatev1.InstanceTypeReference{Name: "test-type"},
+				BootDisk: privatev1.ComputeInstanceDisk_builder{
+					SizeGib:     proto.Int32(20),
+					StorageTier: privatev1.StorageTierReference_builder{Name: "fast"}.Build(),
+				}.Build(),
 			}.Build(),
 			Status: privatev1.ComputeInstanceStatus_builder{
 				State:              privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
