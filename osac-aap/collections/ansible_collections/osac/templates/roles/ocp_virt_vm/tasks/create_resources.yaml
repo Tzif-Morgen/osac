@@ -39,10 +39,23 @@
     definition:
       apiVersion: cdi.kubevirt.io/v1beta1
       kind: DataVolume
-      metadata:
-        name: "{{ compute_instance_name }}-root-disk"
-        labels: "{{ default_vm_labels }}"
-        namespace: "{{ compute_instance_target_namespace }}"
+      metadata: >-
+        {{
+          {
+            'name': compute_instance_name ~ '-root-disk',
+            'labels': default_vm_labels,
+            'namespace': compute_instance_target_namespace
+          }
+          | combine(
+              {
+                'annotations': {
+                  'osac.openshift.io/storage-volume-id': vm_disk_volume_ids['boot']
+                }
+              }
+              if vm_disk_volume_ids.get('boot', '') | default('', true) | length > 0
+              else {}
+            )
+        }}
       spec:
         source:
           registry:
@@ -63,10 +76,23 @@
     definition:
       apiVersion: cdi.kubevirt.io/v1beta1
       kind: DataVolume
-      metadata:
-        name: "{{ compute_instance_name }}-disk-{{ idx + 1 }}"
-        labels: "{{ default_vm_labels }}"
-        namespace: "{{ compute_instance_target_namespace }}"
+      metadata: >-
+        {{
+          {
+            'name': compute_instance_name ~ '-disk-' ~ (idx + 1),
+            'labels': default_vm_labels,
+            'namespace': compute_instance_target_namespace
+          }
+          | combine(
+              {
+                'annotations': {
+                  'osac.openshift.io/storage-volume-id': vm_disk_volume_ids.get('disk-' ~ (idx + 1), '')
+                }
+              }
+              if vm_disk_volume_ids.get('disk-' ~ (idx + 1), '') | default('', true) | length > 0
+              else {}
+            )
+        }}
       spec:
         source:
           blank: {}

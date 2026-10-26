@@ -79,6 +79,7 @@ ROLE_SCENARIO_TESTS=(
   "cluster_working_namespace:test_predefined"
   "cluster_working_namespace:test_found"
   "compute_instance_create:sysprep_secret_copy"
+  "compute_instance_create:volume_id_annotations"
 )
 
 echo "=== Running Workflow Integration Tests ==="
