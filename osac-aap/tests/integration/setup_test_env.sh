@@ -68,6 +68,12 @@ kubectl wait --for=delete pod --all -n cdi --timeout=60s 2>/dev/null || echo "So
 echo "Removing stale KubeVirt/CDI APIServices to keep namespace discovery healthy..."
 kubectl delete apiservice v1.subresources.kubevirt.io v1alpha3.subresources.kubevirt.io v1beta1.upload.cdi.kubevirt.io --ignore-not-found 2>/dev/null || echo "Could not remove one or more stale APIServices"
 
+# Keep KubeVirt CRDs, but remove VM admission hooks while virt-api is stopped.
+kubectl delete \
+  mutatingwebhookconfiguration/virt-api-mutator \
+  validatingwebhookconfiguration/virt-api-validator \
+  --ignore-not-found 2>/dev/null || echo "Could not remove KubeVirt VM webhooks"
+
 # Keep the DataVolume CRD, but remove its fail-closed admission hooks while
 # CDI's API deployment is scaled down. The hooks otherwise reject DataVolumes.
 kubectl delete \
