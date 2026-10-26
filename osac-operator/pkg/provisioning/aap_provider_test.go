@@ -122,7 +122,7 @@ var _ = Describe("AAPProvider", func() {
 				}
 			})
 
-			It("reuses the same disk IDs on a retried job launch", func() {
+			It("preserves disk IDs after a failed launch and retry", func() {
 				instance := &v1alpha1.ComputeInstance{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-resource",
@@ -135,15 +135,31 @@ var _ = Describe("AAPProvider", func() {
 						},
 					},
 				}
+				aapClient.launchJobTemplateFunc = func(_ context.Context, req aap.LaunchJobTemplateRequest) (*aap.LaunchJobTemplateResponse, error) {
+					launches++
+					Expect(req.TemplateName).To(Equal("provision-job"))
+					payload := extractJobVarsResource(req.ExtraVars)
+					spec := payload["spec"].(map[string]any)
+					Expect(spec["diskVolumeIDs"]).To(Equal(map[string]any{
+						"boot":   "volume-boot",
+						"disk-1": "volume-data-1",
+					}))
+					if launches == 1 {
+						return nil, errors.New("temporary AAP API error")
+					}
+					return &aap.LaunchJobTemplateResponse{JobID: 123}, nil
+				}
+
 				result, err := provider.TriggerProvision(ctx, instance)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.JobID).To(Equal("123"))
-				Expect(result.InitialState).To(Equal(v1alpha1.JobStatePending))
-				Expect(result.Message).To(Equal("Provisioning job triggered"))
+				Expect(result).To(BeNil())
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("failed to launch job template"))
 
 				result, err = provider.TriggerProvision(ctx, instance)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.JobID).To(Equal("123"))
+				Expect(result.InitialState).To(Equal(v1alpha1.JobStatePending))
+				Expect(result.Message).To(Equal("Provisioning job triggered"))
 				Expect(launches).To(Equal(2))
 			})
 		})
