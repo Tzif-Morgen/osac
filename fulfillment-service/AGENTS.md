@@ -114,6 +114,16 @@ is still pending. Current LVMS validation requires node topology, which
 conflicts with the ComputeInstance request contract. Keep topology unset and
 report that compatibility failure instead of bypassing validation.
 
+The [OSAC-6612](https://redhat.atlassian.net/browse/OSAC-6612) ComputeInstance
+disk Volume ID handoff is Unit coverage in
+`internal/controllers/computeinstance/computeinstance_reconciler_function_test.go`.
+It verifies that the managed CR builder copies only durable `status.volumes`
+IDs into the optional `spec.diskVolumeIDs` map, including partial status. Run
+`ginkgo run --timeout 20m ./internal/controllers/computeinstance` from
+`fulfillment-service/`. The test uses controlled clients; it does not exercise
+the Volume API, database recovery, AAP, or provider behavior. Readiness before
+dispatch belongs to [OSAC-6613](https://redhat.atlassian.net/browse/OSAC-6613).
+
 The [OSAC-6611](https://redhat.atlassian.net/browse/OSAC-6611) cleanup gate is
 covered at three Fulfillment tiers: controller unit tests exercise Delete/Get
 ordering and denied, inconclusive, and mismatched-record outcomes with
