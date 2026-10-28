@@ -219,7 +219,7 @@ func (r *function) run(ctx context.Context, computeInstance *privatev1.ComputeIn
 		}
 	}
 	if reconcileErr != nil {
-		var secretErr *SecretResolutionError
+		var secretErr *controllers.SSHKeyResolutionError
 		if errors.As(reconcileErr, &secretErr) {
 			if secretErr.Permanent {
 				t.setReconciliationFailedWithReason(secretErr.Err, secretErr.Reason)
@@ -1190,37 +1190,11 @@ func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.Compute
 		}
 	}
 	if sshKeyRef := ciSpec.GetSshKey(); sshKeyRef != nil {
-		if sshKeyRef.GetId() == "" {
-			return &SecretResolutionError{
-				Permanent: true,
-				Reason:    "SecretInvalid",
-				Err:       status.Error(codes.InvalidArgument, "ComputeInstance SSH key Secret reference has no id"),
-			}
+		publicKey, err := controllers.ResolveSSHKey(ctx, t.r.secretsClient, sshKeyRef)
+		if err != nil {
+			return err
 		}
-		response, secretErr := t.r.secretsClient.Get(ctx, privatev1.SecretsGetRequest_builder{
-			Id: sshKeyRef.GetId(),
-		}.Build())
-		if secretErr != nil {
-			code := status.Code(secretErr)
-			resolutionErr := &SecretResolutionError{Err: secretErr}
-			switch code {
-			case codes.NotFound:
-				resolutionErr.Permanent = true
-				resolutionErr.Reason = "SecretNotFound"
-			case codes.InvalidArgument:
-				resolutionErr.Permanent = true
-				resolutionErr.Reason = "SecretInvalid"
-			}
-			return resolutionErr
-		}
-		if response == nil || response.GetObject() == nil {
-			return &SecretResolutionError{
-				Err: status.Error(codes.Unknown, "Secrets.Get returned no object"),
-			}
-		}
-		secret := response.GetObject()
-		publicKey := secret.GetData()["public_key"]
-		spec.SSHKey = string(publicKey)
+		spec.SSHKey = publicKey
 	}
 	if t.userDataSecretName != "" {
 		spec.UserDataSecretRef = &corev1.LocalObjectReference{
