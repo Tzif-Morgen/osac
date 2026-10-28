@@ -470,62 +470,34 @@ func findDiskRegistrationVolume(
 		strconv.Quote(candidate.request.GetObject().GetMetadata().GetName()),
 		strconv.Quote(metadata.GetTenant()),
 		strconv.Quote(metadata.GetProject()))
-	const limit = int32(diskRegistrationListPageSize)
-	offset := int32(0)
-	total := int32(-1)
-	volumes := make([]*privatev1.Volume, 0)
-	seenIDs := make(map[string]struct{})
-	for {
-		response, err := client.List(ctx, privatev1.VolumesListRequest_builder{
-			Offset: proto.Int32(offset),
-			Limit:  proto.Int32(limit),
-			Filter: proto.String(filter),
-		}.Build())
-		if err != nil {
-			return nil, false, err
-		}
-		if response == nil {
-			return nil, false, fmt.Errorf("volumes List returned no response")
-		}
-		page := response.GetItems()
-		pageSize := response.GetSize()
-		if pageSize < 0 || response.GetTotal() < 0 || int64(pageSize) != int64(len(page)) || pageSize > limit {
-			return nil, false, fmt.Errorf("volumes List returned inconsistent pagination metadata")
-		}
-		if total < 0 {
-			total = response.GetTotal()
-		} else if response.GetTotal() != total {
-			return nil, false, fmt.Errorf("volumes List total changed during recovery")
-		}
-		if pageSize == 0 && offset < total {
-			return nil, false, fmt.Errorf("volumes List made no progress at offset %d of %d", offset, total)
-		}
-		for _, volume := range page {
-			if volume == nil || volume.GetId() == "" {
-				return nil, false, fmt.Errorf("volumes List returned an item without an ID")
-			}
-			if _, duplicate := seenIDs[volume.GetId()]; duplicate {
-				return nil, false, fmt.Errorf("volumes List repeated ID '%s' across pages", volume.GetId())
-			}
-			seenIDs[volume.GetId()] = struct{}{}
-			volumes = append(volumes, volume)
-		}
-		if int64(len(volumes)) > int64(total) {
-			return nil, false, fmt.Errorf("volumes List returned more items than its total")
-		}
-		if int64(len(volumes)) == int64(total) {
-			break
-		}
-		nextOffset := offset + pageSize
-		if nextOffset <= offset || nextOffset > total {
-			return nil, false, fmt.Errorf("volumes List pagination did not advance consistently")
-		}
-		offset = nextOffset
+	response, err := client.List(ctx, privatev1.VolumesListRequest_builder{
+		Limit:  proto.Int32(1),
+		Filter: proto.String(filter),
+	}.Build())
+	if err != nil {
+		return nil, false, err
 	}
-	if len(volumes) != 1 || !diskRegistrationVolumeMatches(volumes[0], candidate.request) {
+	if response == nil {
+		return nil, false, fmt.Errorf("volumes List returned no response")
+	}
+	items := response.GetItems()
+	size, total := response.GetSize(), response.GetTotal()
+	if size < 0 || total < 0 || size > 1 || int64(size) != int64(len(items)) || size > total ||
+		(total > 0 && size == 0) {
+		return nil, false, fmt.Errorf("volumes List returned inconsistent pagination metadata")
+	}
+	// List includes deletion-pending Volumes, which can share this name with an active Volume.
+	if total != 1 {
 		return nil, false, nil
 	}
-	return volumes[0], true, nil
+	volume := items[0]
+	if volume == nil || volume.GetId() == "" {
+		return nil, false, fmt.Errorf("volumes List returned an item without an ID")
+	}
+	if !diskRegistrationVolumeMatches(volume, candidate.request) {
+		return nil, false, nil
+	}
+	return volume, true, nil
 }
 
 func diskRegistrationVolumeMatches(volume *privatev1.Volume, request *privatev1.VolumesCreateRequest) bool {
@@ -620,5 +592,3 @@ func diskRegistrationProgress(instance *privatev1.ComputeInstance) (bool, string
 	return false, "VolumeRegistrationPending", message +
 		"registration or recovery is pending.", nil
 }
-
-const diskRegistrationListPageSize = 100

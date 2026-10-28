@@ -18,7 +18,6 @@ package computeinstance
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -222,7 +221,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 	})
 
 	DescribeTable("fails closed on incomplete or conflicting List results",
-		func(list func(*registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error), expectError bool, expectedListCalls int) {
+		func(list func(*registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error), expectError bool) {
 			computeClient, volumesClient := registrationTestClients()
 			computeClient.object.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 				privatev1.ComputeInstanceVolumeRegistration_builder{
@@ -240,7 +239,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 			Expect(volumesClient.createRequests).To(BeEmpty())
-			Expect(volumesClient.listRequests).To(HaveLen(expectedListCalls))
+			Expect(volumesClient.listRequests).To(HaveLen(1))
+			Expect(volumesClient.listRequests[0].GetLimit()).To(Equal(int32(1)))
+			Expect(volumesClient.listRequests[0].GetOffset()).To(BeZero())
 			Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 				privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		},
@@ -248,95 +249,87 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 				return registrationTestListResponse(nil, 0), nil
 			}
-		}, false, 1),
+		}, false),
 		Entry("foreign scope", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetMetadata().SetTenant("tenant-b")
 			})
-		}, false, 1),
+		}, false),
 		Entry("mismatched name", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetMetadata().SetName("different-name")
 			})
-		}, false, 1),
+		}, false),
 		Entry("mismatched project", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetMetadata().SetProject("project-b")
 			})
-		}, false, 1),
+		}, false),
 		Entry("mismatched spec", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetSpec().SetSizeGib(99)
 			})
-		}, false, 1),
+		}, false),
 		Entry("mismatched topology", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetSpec().SetTopology(privatev1.VolumeTopology_builder{
 					Segments: map[string]string{"osac.io/node": "different-node"},
 				}.Build())
 			})
-		}, false, 1),
+		}, false),
 		Entry("wrong creator", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetMetadata().SetCreator("tenant-user")
 			})
-		}, false, 1),
+		}, false),
 		Entry("deleting metadata", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
 			})
-		}, false, 1),
+		}, false),
 		Entry("deleting lifecycle state", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetStatus().SetState(privatev1.VolumeState_VOLUME_STATE_DELETING)
 			})
-		}, false, 1),
+		}, false),
 		Entry("archived lifecycle state", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetStatus().SetState(privatev1.VolumeState_VOLUME_STATE_DELETED)
 			})
-		}, false, 1),
-		Entry("multiple results across complete pages", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
-			matching := registrationTestVolume(requestFromListFixture(), "volume-one", "system")
-			second := proto.Clone(matching).(*privatev1.Volume)
-			second.SetId("volume-two")
-			calls := 0
-			return func(_ context.Context, request *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
-				calls++
-				Expect(request.GetOffset()).To(Equal(int32(calls - 1)))
-				Expect(request.GetLimit()).To(Equal(int32(diskRegistrationListPageSize)))
-				if calls == 1 {
-					return registrationTestListResponse([]*privatev1.Volume{matching}, 2), nil
-				}
-				return registrationTestListResponse([]*privatev1.Volume{second}, 2), nil
+		}, false),
+		Entry("active result with another deletion-pending match", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+				matching := registrationTestVolume(requestFromListFixture(), "volume-active", "system")
+				return registrationTestListResponse([]*privatev1.Volume{matching}, 2), nil
 			}
-		}, false, 2),
-		Entry("non-progressing page", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+		}, false),
+		Entry("missing item despite positive total", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 				return registrationTestListResponse(nil, 1), nil
 			}
-		}, true, 1),
+		}, true),
 		Entry("inconsistent page size", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 				return privatev1.VolumesListResponse_builder{Size: 1, Total: 1}.Build(), nil
 			}
-		}, true, 1),
-		Entry("inconsistent total", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
-			calls := 0
-			return func(_ context.Context, request *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
-				calls++
-				item := registrationTestVolume(requestFromListFixture(), fmt.Sprintf("volume-%d", calls), "system")
-				if calls == 1 {
-					return registrationTestListResponse([]*privatev1.Volume{item}, 2), nil
-				}
-				return registrationTestListResponse([]*privatev1.Volume{item}, 3), nil
+		}, true),
+		Entry("item exceeds total", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+				item := registrationTestVolume(requestFromListFixture(), "volume-one", "system")
+				return registrationTestListResponse([]*privatev1.Volume{item}, 0), nil
 			}
-		}, true, 2),
+		}, true),
+		Entry("page exceeds requested limit", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+				item := registrationTestVolume(requestFromListFixture(), "volume-one", "system")
+				return registrationTestListResponse([]*privatev1.Volume{item, item}, 2), nil
+			}
+		}, true),
 		Entry("List error", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 				return nil, status.Error(codes.PermissionDenied, "not visible")
 			}
-		}, true, 1),
+		}, true),
 	)
 
 	It("uses CEL string escaping for every exact-scope filter value", func() {
