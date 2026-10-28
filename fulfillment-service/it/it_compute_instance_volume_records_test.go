@@ -41,7 +41,10 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const diskRegistrationVolumeHoldFinalizer = "osac-test.osac.io/hold-volume-record-cleanup"
+const (
+	diskRegistrationVolumeHoldFinalizer = "osac-test.osac.io/hold-volume-record-cleanup"
+	diskRegistrationPlaceholderNode     = "osac-volume-registration-pending"
+)
 
 var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	var (
@@ -116,7 +119,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 				Expect(observed.GetObject().GetMetadata().GetProject()).To(Equal(parent.GetMetadata().GetProject()))
 				Expect(observed.GetObject().GetSpec().GetStorageTier()).To(Equal(storageTierName))
 				Expect(observed.GetObject().GetSpec().GetSizeGib()).To(Equal(int64(30)))
-				Expect(observed.GetObject().GetSpec().GetTopology()).To(BeNil())
+				Expect(observed.GetObject().GetSpec().GetTopology().GetSegments()).To(Equal(
+					map[string]string{"osac.io/node": diskRegistrationPlaceholderNode}))
 			},
 		}
 		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
@@ -472,6 +476,153 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
 		}, 2*time.Minute, time.Second).Should(Succeed())
 	})
+
+	DescribeTable("registers and removes disk records through a supported storage tier", func(ctx context.Context, provider string) {
+		tierID := createCatalogItemStorageTierFixtureForProvider(ctx, provider)
+		storageTiers := privatev1.NewStorageTiersClient(tool.InternalView().AdminConn())
+		tier, err := storageTiers.Get(ctx, privatev1.StorageTiersGetRequest_builder{Id: tierID}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		tierName := tier.GetObject().GetMetadata().GetName()
+
+		spec := publicv1.ComputeInstanceSpec_builder{
+			Template:           publicv1.ComputeInstanceTemplateReference_builder{Id: templateID}.Build(),
+			NetworkAttachments: []*publicv1.ComputeNetworkAttachment{network.computeInstanceAttachment()},
+			BootDisk: publicv1.ComputeInstanceDisk_builder{
+				SizeGib:     new(int32(30)),
+				StorageTier: publicv1.StorageTierReference_builder{Id: tierID}.Build(),
+			}.Build(),
+			AdditionalDisks: publicv1.ComputeInstanceDiskList_builder{Items: []*publicv1.ComputeInstanceDisk{
+				publicv1.ComputeInstanceDisk_builder{
+					SizeGib:     new(int32(12)),
+					StorageTier: publicv1.StorageTierReference_builder{Id: tierID}.Build(),
+				}.Build(),
+			}}.Build(),
+		}.Build()
+		var committedBootID string
+		DeferCleanup(func(cleanupCtx context.Context) {
+			if committedBootID == "" {
+				return
+			}
+			_, cleanupErr := volumes.Delete(cleanupCtx,
+				privatev1.VolumesDeleteRequest_builder{Id: committedBootID}.Build())
+			Expect(cleanupErr == nil || status.Code(cleanupErr) == codes.NotFound).To(BeTrue())
+		})
+		instance := createDiskRegistrationAPIContractInstance(ctx, spec)
+		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parent.GetSpec().GetBootDisk().GetStorageTier().GetName()).To(Equal(tierName))
+		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()).To(HaveLen(1))
+		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()[0].GetStorageTier().GetName()).To(Equal(tierName))
+
+		faultingVolumes := &diskRegistrationLostResponseVolumesClient{
+			VolumesClient: volumes,
+			hideFirstList: true,
+			afterCreate: func(response *privatev1.VolumesCreateResponse) {
+				committedBootID = response.GetObject().GetId()
+			},
+		}
+		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
+		Expect(err).To(HaveOccurred())
+		Expect(complete).To(BeFalse())
+		Expect(committedBootID).NotTo(BeEmpty())
+		Expect(faultingVolumes.createCalls).To(Equal(1))
+		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
+
+		By("recovering the committed boot record and creating the additional record")
+		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(complete).To(BeTrue())
+		resolved, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resolved.GetStatus().GetVolumes()).To(HaveLen(2))
+		ids := make(map[string]string, 2)
+		for _, saved := range resolved.GetStatus().GetVolumes() {
+			ids[saved.GetDiskKey()] = saved.GetVolumeId()
+		}
+		Expect(ids).To(HaveKeyWithValue("boot", committedBootID))
+		Expect(ids).To(HaveKey("disk-1"))
+		Expect(ids["disk-1"]).NotTo(BeEmpty())
+		Expect(ids["disk-1"]).NotTo(Equal(committedBootID))
+
+		for key, size := range map[string]int64{"boot": 30, "disk-1": 12} {
+			id := ids[key]
+			DeferCleanup(func(cleanupCtx context.Context) {
+				setDiskRegistrationVolumeHoldFinalizer(cleanupCtx, volumes, id, false)
+			})
+			name := "ci-" + instance.GetId() + "-" + key
+			filter := diskRegistrationAPIFilter(name, parent.GetMetadata().GetTenant(), parent.GetMetadata().GetProject())
+			found, listErr := volumes.List(ctx, privatev1.VolumesListRequest_builder{
+				Filter: &filter,
+			}.Build())
+			Expect(listErr).NotTo(HaveOccurred())
+			Expect(found.GetTotal()).To(Equal(int32(1)))
+			Expect(found.GetItems()[0].GetId()).To(Equal(id))
+			observed, getErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+			Expect(getErr).NotTo(HaveOccurred())
+			Expect(observed.GetObject().GetMetadata().GetName()).To(Equal(name))
+			Expect(observed.GetObject().GetMetadata().GetTenant()).To(Equal(parent.GetMetadata().GetTenant()))
+			Expect(observed.GetObject().GetMetadata().GetProject()).To(Equal(parent.GetMetadata().GetProject()))
+			Expect(observed.GetObject().GetMetadata().GetCreator()).To(Equal("system"))
+			Expect(observed.GetObject().GetSpec().GetStorageTier()).To(Equal(tierName))
+			Expect(observed.GetObject().GetSpec().GetSizeGib()).To(Equal(size))
+			Expect(observed.GetObject().GetStatus().GetProvider()).To(Equal(provider))
+			Expect(observed.GetObject().GetSpec().GetTopology().GetSegments()).To(Equal(
+				map[string]string{"osac.io/node": diskRegistrationPlaceholderNode}))
+		}
+
+		By("checking the managed CR receives both durable IDs")
+		_, err = computeInstances.Signal(ctx,
+			privatev1.ComputeInstancesSignalRequest_builder{Id: instance.GetId()}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			objects := &osacv1alpha1.ComputeInstanceList{}
+			g.Expect(tool.KubeClient().List(ctx, objects,
+				crclient.MatchingLabels{labels.ComputeInstanceUuid: instance.GetId()},
+			)).To(Succeed())
+			g.Expect(objects.Items).To(HaveLen(1))
+			g.Expect(objects.Items[0].Spec.DiskVolumeIDs).To(Equal(ids))
+		}, time.Minute, time.Second).Should(Succeed())
+
+		for _, id := range ids {
+			setDiskRegistrationVolumeHoldFinalizer(ctx, volumes, id, true)
+		}
+		publicInstances := publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
+		_, err = publicInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: instance.GetId()}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			deleting, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(deleting.GetMetadata().HasDeletionTimestamp()).To(BeTrue())
+			g.Expect(deleting.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
+			g.Expect(deleting.GetStatus().GetVolumes()).To(HaveLen(2))
+			for _, id := range ids {
+				visible, volumeErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+				g.Expect(volumeErr).NotTo(HaveOccurred())
+				g.Expect(visible.GetObject().GetMetadata().HasDeletionTimestamp()).To(BeTrue())
+			}
+		}, 2*time.Minute, time.Second).Should(Succeed())
+		for _, id := range ids {
+			setDiskRegistrationVolumeHoldFinalizer(ctx, volumes, id, false)
+		}
+		for _, id := range ids {
+			Eventually(func(g Gomega) {
+				_, getErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+				g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+			}, 2*time.Minute, time.Second).Should(Succeed())
+		}
+		Eventually(func(g Gomega) {
+			_, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+		}, 2*time.Minute, time.Second).Should(Succeed())
+	},
+		Entry("LVMS", "lvms"),
+		Entry("VAST API record", "vast"),
+	)
 })
 
 func createDiskRegistrationAPIContractInstance(ctx context.Context, spec *publicv1.ComputeInstanceSpec) *publicv1.ComputeInstance {
@@ -586,6 +737,9 @@ func diskRegistrationVolumeRequest(
 				StorageTier: storageTier,
 				SizeGib:     sizeGib,
 				AccessMode:  privatev1.VolumeAccessMode_VOLUME_ACCESS_MODE_READ_WRITE_ONCE,
+				Topology: privatev1.VolumeTopology_builder{
+					Segments: map[string]string{"osac.io/node": diskRegistrationPlaceholderNode},
+				}.Build(),
 			}.Build(),
 		}.Build(),
 	}.Build()
