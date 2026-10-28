@@ -1152,9 +1152,6 @@ func (t *task) buildSpecNetworkAttachments(ctx context.Context, spec *osacv1alph
 
 func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.ComputeInstanceSpec) error {
 	ciSpec := t.computeInstance.GetSpec()
-	if err := t.addDiskVolumeIDs(spec); err != nil {
-		return err
-	}
 
 	instanceTypeRef := ciSpec.GetInstanceType()
 	if instanceTypeRef == nil {
@@ -1231,6 +1228,9 @@ func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.Compute
 			})
 		}
 		spec.AdditionalDisks = operatorDisks
+	}
+	if err := t.addDiskVolumeIDs(spec); err != nil {
+		return err
 	}
 
 	return nil
