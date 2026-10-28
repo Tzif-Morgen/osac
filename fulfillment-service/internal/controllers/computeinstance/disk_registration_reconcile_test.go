@@ -47,7 +47,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			Expect(request.GetObject().GetMetadata().GetProject()).To(BeEmpty())
 			Expect(request.GetObject().GetSpec().GetStorageTier()).To(Equal("vm-boot"))
 			Expect(request.GetObject().GetSpec().GetSizeGib()).To(Equal(int64(40)))
-			Expect(request.GetObject().GetSpec().GetTopology()).To(BeNil())
+			Expect(request.GetObject().GetSpec().GetTopology().GetSegments()).To(Equal(map[string]string{
+				"osac.io/node": "osac-volume-registration-pending",
+			}))
 			volume := registrationTestVolume(request, "volume-boot", "system")
 			return privatev1.VolumesCreateResponse_builder{Object: volume}.Build(), nil
 		}
@@ -80,6 +82,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		volumesClient := &registrationVolumesClient{}
 		volumesClient.create = func(_ context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
 			Expect(request.GetObject().GetMetadata().GetProject()).To(Equal("project-a"))
+			Expect(request.GetObject().GetSpec().GetTopology().GetSegments()).To(Equal(map[string]string{
+				"osac.io/node": "osac-volume-registration-pending",
+			}))
 			switch request.GetObject().GetMetadata().GetName() {
 			case "ci-" + diskRegistrationTestID + "-boot":
 				Expect(request.GetObject().GetSpec().GetStorageTier()).To(Equal("vm-boot"))
@@ -262,6 +267,13 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		Entry("mismatched spec", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
 				volume.GetSpec().SetSizeGib(99)
+			})
+		}, false, 1),
+		Entry("mismatched topology", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return oneRegistrationVolumeResponse(func(volume *privatev1.Volume) {
+				volume.GetSpec().SetTopology(privatev1.VolumeTopology_builder{
+					Segments: map[string]string{"osac.io/node": "different-node"},
+				}.Build())
 			})
 		}, false, 1),
 		Entry("wrong creator", func(volumes *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {

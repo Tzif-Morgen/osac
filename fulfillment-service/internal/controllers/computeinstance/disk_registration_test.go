@@ -52,7 +52,9 @@ var _ = Describe("ComputeInstance disk registration preparation", func() {
 			Expect(request.GetObject().GetSpec().GetSizeGib()).To(Equal(size))
 			Expect(request.GetObject().GetSpec().GetAccessMode()).To(
 				Equal(privatev1.VolumeAccessMode_VOLUME_ACCESS_MODE_READ_WRITE_ONCE))
-			Expect(request.GetObject().GetSpec().GetTopology()).To(BeNil())
+			Expect(request.GetObject().GetSpec().GetTopology().GetSegments()).To(Equal(map[string]string{
+				"osac.io/node": "osac-volume-registration-pending",
+			}))
 		}
 
 		expectRequest(0, "boot", "ci-"+diskRegistrationTestID+"-boot", "vm-boot", 40)
@@ -105,6 +107,22 @@ var _ = Describe("ComputeInstance disk registration preparation", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second[0].request.GetObject().GetMetadata().GetName()).To(Equal(
 			first[0].request.GetObject().GetMetadata().GetName()))
+		Expect(proto.Equal(second[0].request, first[0].request)).To(BeTrue())
+	})
+
+	It("reconstructs the complete boot and additional disk requests after restart", func() {
+		instance := diskRegistrationTestInstance()
+		first, err := prepareDiskRegistrations(instance)
+		Expect(err).NotTo(HaveOccurred())
+
+		restarted := proto.Clone(instance).(*privatev1.ComputeInstance)
+		second, err := prepareDiskRegistrations(restarted)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(second).To(HaveLen(len(first)))
+		for index := range first {
+			Expect(second[index].diskKey).To(Equal(first[index].diskKey))
+			Expect(proto.Equal(second[index].request, first[index].request)).To(BeTrue())
+		}
 	})
 
 	It("keeps an explicitly empty additional-disk list empty", func() {

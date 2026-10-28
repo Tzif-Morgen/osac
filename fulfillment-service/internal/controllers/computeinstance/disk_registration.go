@@ -33,6 +33,7 @@ import (
 )
 
 const computeInstanceDiskRegistrationUpdateMask = "status.volume_registration"
+const diskRegistrationPlaceholderNode = "osac-volume-registration-pending"
 
 type preparedDiskRegistration struct {
 	diskKey string
@@ -96,6 +97,11 @@ func prepareDiskRegistrations(instance *privatev1.ComputeInstance) ([]preparedDi
 				StorageTier: input.disk.GetStorageTier().GetName(),
 				SizeGib:     int64(input.disk.GetSizeGib()),
 				AccessMode:  privatev1.VolumeAccessMode_VOLUME_ACCESS_MODE_READ_WRITE_ONCE,
+				// LVMS requires a node in the Volume API before AAP selects placement.
+				// This is not the VM/DataVolume node; keep it stable for exact-spec recovery.
+				Topology: privatev1.VolumeTopology_builder{
+					Segments: map[string]string{"osac.io/node": diskRegistrationPlaceholderNode},
+				}.Build(),
 			}.Build(),
 		}.Build()
 		prepared = append(prepared, preparedDiskRegistration{
