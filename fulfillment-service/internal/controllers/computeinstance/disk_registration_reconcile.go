@@ -132,7 +132,7 @@ func reconcileDiskRegistrationCandidate(
 		}
 		if !current.GetMetadata().HasDeletionTimestamp() &&
 			(registration == nil || registration.GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED) {
-			_, conflict, storeErr := persistDiskRegistrationResolution(ctx, computeInstancesClient,
+			conflict, storeErr := persistDiskRegistrationResolution(ctx, computeInstancesClient,
 				current, diskKey, volume.GetVolumeId())
 			if storeErr != nil {
 				return storeErr
@@ -178,7 +178,7 @@ func recoverUncertainDiskRegistration(
 	if !found {
 		return nil
 	}
-	_, _, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
+	_, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
 		current, candidate.diskKey, volume.GetId())
 	return err
 }
@@ -214,7 +214,7 @@ func createDiskRegistration(
 		volume = response.GetObject()
 	}
 	if diskRegistrationVolumeMatches(volume, candidate.request) {
-		_, _, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
+		_, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
 			current, candidate.diskKey, volume.GetId())
 		return err
 	}
@@ -311,7 +311,7 @@ func recoverCreatedDiskRegistration(
 		return fmt.Errorf("volume Create for ComputeInstance '%s' disk '%s' returned no adoptable record",
 			current.GetId(), candidate.diskKey)
 	}
-	_, _, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
+	_, err = persistDiskRegistrationResolution(ctx, computeInstancesClient,
 		current, candidate.diskKey, volume.GetId())
 	return err
 }
@@ -402,30 +402,30 @@ func persistDiskRegistrationResolution(
 	current *privatev1.ComputeInstance,
 	diskKey string,
 	volumeID string,
-) (*privatev1.ComputeInstance, bool, error) {
+) (bool, error) {
 	if volumeID == "" {
-		return nil, false, fmt.Errorf("ComputeInstance '%s' disk '%s' cannot resolve an empty Volume ID", current.GetId(), diskKey)
+		return false, fmt.Errorf("ComputeInstance '%s' disk '%s' cannot resolve an empty Volume ID", current.GetId(), diskKey)
 	}
 	registrations := cloneDiskRegistrations(current.GetStatus().GetVolumeRegistration())
 	registrationByKey, err := diskRegistrationByKey(registrations)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	registration := registrationByKey[diskKey]
 	if registration == nil {
-		return nil, false, fmt.Errorf("ComputeInstance '%s' disk '%s' has no persisted registration intent", current.GetId(), diskKey)
+		return false, fmt.Errorf("ComputeInstance '%s' disk '%s' has no persisted registration intent", current.GetId(), diskKey)
 	}
 	volumes := cloneComputeInstanceVolumes(current.GetStatus().GetVolumes())
 	volumeByKey, err := diskVolumesByKey(volumes)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	if existing, exists := volumeByKey[diskKey]; exists {
 		if existing.GetVolumeId() != volumeID {
-			return nil, false, fmt.Errorf("ComputeInstance '%s' disk '%s' already has a different Volume ID", current.GetId(), diskKey)
+			return false, fmt.Errorf("ComputeInstance '%s' disk '%s' already has a different Volume ID", current.GetId(), diskKey)
 		}
 		if registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED {
-			return current, false, nil
+			return false, nil
 		}
 	} else {
 		volumes = append(volumes, privatev1.ComputeInstanceVolume_builder{
@@ -448,15 +448,15 @@ func persistDiskRegistrationResolution(
 		Lock: true,
 	}.Build())
 	if status.Code(err) == codes.Aborted {
-		return nil, true, nil
+		return true, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to persist Volume ID for ComputeInstance '%s' disk '%s': %w", current.GetId(), diskKey, err)
+		return false, fmt.Errorf("failed to persist Volume ID for ComputeInstance '%s' disk '%s': %w", current.GetId(), diskKey, err)
 	}
 	if response == nil || response.GetObject() == nil {
-		return nil, false, fmt.Errorf("ComputeInstances Update returned no object while resolving disk '%s'", diskKey)
+		return false, fmt.Errorf("ComputeInstances Update returned no object while resolving disk '%s'", diskKey)
 	}
-	return response.GetObject(), false, nil
+	return false, nil
 }
 
 func isKnownNonCommittedVolumeCreateError(err error) bool {
