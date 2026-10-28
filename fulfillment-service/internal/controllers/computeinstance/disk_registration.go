@@ -298,17 +298,17 @@ func validateDiskRegistrationKeys(
 	registrations map[string]*privatev1.ComputeInstanceVolumeRegistration,
 	volumes map[string]*privatev1.ComputeInstanceVolume,
 ) error {
-	required := make(map[string]struct{}, len(prepared))
+	required := make(map[string]bool, len(prepared))
 	for _, candidate := range prepared {
-		required[candidate.diskKey] = struct{}{}
+		required[candidate.diskKey] = true
 	}
 	for diskKey := range registrations {
-		if _, exists := required[diskKey]; !exists {
+		if !required[diskKey] {
 			return fmt.Errorf("ComputeInstance '%s' has registration state for unknown disk '%s'", instance.GetId(), diskKey)
 		}
 	}
 	for diskKey := range volumes {
-		if _, exists := required[diskKey]; !exists {
+		if !required[diskKey] {
 			return fmt.Errorf("ComputeInstance '%s' has a Volume ID for unknown disk '%s'", instance.GetId(), diskKey)
 		}
 	}
