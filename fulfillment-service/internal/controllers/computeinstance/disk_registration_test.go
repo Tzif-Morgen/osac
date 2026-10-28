@@ -170,7 +170,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 				Expect(request.GetUpdateMask().GetPaths()).To(Equal([]string{
 					computeInstanceDiskRegistrationUpdateMask, "status.conditions"}))
 				Expect(registrationStates(request.GetObject())).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
-					"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+					"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 					"disk-1": privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 					"disk-2": privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 				}))
@@ -189,7 +189,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(claimed).To(BeTrue())
 		Expect(request.GetObject().GetMetadata().GetName()).To(Equal("ci-" + diskRegistrationTestID + "-boot"))
-		Expect(registrationStates(persisted)["boot"]).To(Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+		Expect(registrationStates(persisted)["boot"]).To(Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 	})
 
 	DescribeTable("does not return a request when persistence fails",
@@ -286,7 +286,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 		current.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "boot",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 		client.EXPECT().Get(gomock.Any(), gomock.Any()).Return(
@@ -300,7 +300,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(request).To(BeNil())
 		Expect(claimed).To(BeFalse())
-		Expect(registrationStates(current)["boot"]).To(Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+		Expect(registrationStates(current)["boot"]).To(Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 	})
 
 	It("retains known IDs and unresolved intents while claiming another disk", func() {
@@ -318,7 +318,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 			}.Build(),
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "disk-1",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "disk-2",
@@ -335,8 +335,8 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 				Expect(request.GetObject().GetStatus().GetVolumes()).To(Equal(current.GetStatus().GetVolumes()))
 				Expect(registrationStates(request.GetObject())).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
 					"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
-					"disk-1": privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
-					"disk-2": privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+					"disk-1": privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
+					"disk-2": privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 				}))
 				updated := commitDiskRegistrationUpdate(current, request)
 				return privatev1.ComputeInstancesUpdateResponse_builder{Object: updated}.Build(), nil
@@ -365,7 +365,7 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 				current.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 					privatev1.ComputeInstanceVolumeRegistration_builder{
 						DiskKey: "boot",
-						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 					}.Build(),
 				})
 			} else {

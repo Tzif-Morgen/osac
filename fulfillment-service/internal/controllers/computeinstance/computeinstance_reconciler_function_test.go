@@ -737,7 +737,7 @@ var _ = Describe("disk Volume ID handoff", func() {
 			}.Build(),
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "disk-1",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		}, 1)
 
@@ -863,7 +863,7 @@ var _ = Describe("disk registration handoff from the reconciler", func() {
 			Expect(name).To(HavePrefix("ci-" + diskRegistrationTestID + "-"))
 			diskKey := name[len("ci-"+diskRegistrationTestID+"-"):]
 			Expect(registrationStates(computeClient.object)[diskKey]).To(Equal(
-				privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 			Expect(provisioned(computeClient.object).GetReason()).To(Equal("VolumeRegistrationPending"))
 			return privatev1.VolumesCreateResponse_builder{
 				Object: registrationTestVolume(request, "volume-"+diskKey, "system"),
@@ -1052,7 +1052,7 @@ var _ = Describe("disk registration handoff from the reconciler", func() {
 		instance.GetSpec().SetAdditionalDisks(nil)
 		instance.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
-				DiskKey: "boot", State: privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				DiskKey: "boot", State: privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 		volumesClient := &registrationVolumesClient{}
@@ -1618,7 +1618,7 @@ var _ = Describe("delete", func() {
 		t, computeInstancesClient, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "boot",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 		prepared, err := prepareDiskRegistrations(t.computeInstance)
@@ -1653,7 +1653,7 @@ var _ = Describe("delete", func() {
 		t, _, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "boot",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 
@@ -1664,7 +1664,7 @@ var _ = Describe("delete", func() {
 		Expect(volumesClient.createCalls).To(BeZero())
 		Expect(volumesClient.getRequests).To(BeEmpty())
 		Expect(t.computeInstance.GetStatus().GetVolumeRegistration()[0].GetState()).To(
-			Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 	})
 
 	It("should remove finalizer when K8s object doesn't exist", func() {

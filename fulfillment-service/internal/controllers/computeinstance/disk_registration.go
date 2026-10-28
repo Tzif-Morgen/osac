@@ -113,7 +113,7 @@ func prepareDiskRegistrations(instance *privatev1.ComputeInstance) ([]preparedDi
 }
 
 // prepareAndClaimDiskRegistration persists the intent list and then atomically
-// changes one eligible disk to UNCERTAIN before returning its Create request.
+// changes one eligible disk to UNKNOWN before returning its Create request.
 func (t *task) prepareAndClaimDiskRegistration(ctx context.Context) (*privatev1.VolumesCreateRequest, bool, error) {
 	if t.r == nil || t.r.computeInstancesClient == nil {
 		return nil, false, fmt.Errorf("ComputeInstances client is not configured")
@@ -341,7 +341,7 @@ func claimDiskRegistration(
 		registration.GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE) {
 		return false, nil
 	}
-	registration.SetState(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN)
+	registration.SetState(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN)
 	updated := proto.Clone(current).(*privatev1.ComputeInstance)
 	updated.GetStatus().SetVolumeRegistration(registrations)
 	_, reason, message, err := diskRegistrationProgress(updated)
@@ -384,7 +384,7 @@ func diskRegistrationByKey(
 		switch registration.GetState() {
 		case privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE,
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED:
 		default:
 			return nil, fmt.Errorf("ComputeInstance disk '%s' has unsupported registration state %d",

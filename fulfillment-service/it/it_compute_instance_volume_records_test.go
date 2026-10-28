@@ -133,7 +133,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
 		Expect(uncertain.GetStatus().GetConditions()).To(ContainElement(WithTransform(
 			func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
@@ -215,7 +215,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(persisted.GetStatus().GetVolumes()).To(BeEmpty())
 		Expect(diskRegistrationState(persisted, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		all, err := volumes.List(ctx, privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all.GetTotal()).To(Equal(int32(1)))
@@ -318,7 +318,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 				observed, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 				Expect(getErr).NotTo(HaveOccurred())
 				Expect(diskRegistrationState(observed, "boot")).To(Equal(
-					privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+					privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 				Expect(observed.GetStatus().GetConditions()).To(ContainElement(WithTransform(
 					func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
 					Equal("VolumeRegistrationPending"))))
@@ -346,7 +346,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(slices.Contains(retained.GetMetadata().GetFinalizers(), finalizers.Controller)).To(BeTrue())
 		Expect(diskRegistrationState(retained, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 
 		By("keeping the managed workload absent while the attempt is unresolved")
 		assertNoDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
@@ -415,7 +415,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(cancelled.GetMetadata().HasDeletionTimestamp()).To(BeTrue())
 		Expect(cancelled.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
 		Expect(diskRegistrationState(cancelled, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		assertNoDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
 	})
 
@@ -530,7 +530,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
 
 		By("recovering the committed boot record and creating the additional record")
@@ -858,7 +858,7 @@ func (c *diskRegistrationMarkerResponseLossClient) Update(
 
 func diskRegistrationRequestHasUncertainState(request *privatev1.ComputeInstancesUpdateRequest) bool {
 	for _, registration := range request.GetObject().GetStatus().GetVolumeRegistration() {
-		if registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN {
+		if registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN {
 			return true
 		}
 	}

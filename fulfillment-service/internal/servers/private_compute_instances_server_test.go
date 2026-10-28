@@ -914,7 +914,7 @@ var _ = Describe("Private compute instances server", func() {
 				}.Build(),
 				privatev1.ComputeInstanceVolumeRegistration_builder{
 					DiskKey: "disk-1",
-					State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+					State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 				}.Build(),
 			}, 1),
 			Entry("complete pairs", []*privatev1.ComputeInstanceVolume{
@@ -962,7 +962,7 @@ var _ = Describe("Private compute instances server", func() {
 			},
 			Entry("never attempted", privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED, false),
 			Entry("confirmed non-committed failure", privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE, false),
-			Entry("uncertain", privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN, false),
+			Entry("unknown", privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN, false),
 			Entry("resolved", privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED, true),
 		)
 
@@ -1027,7 +1027,7 @@ var _ = Describe("Private compute instances server", func() {
 						VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
 							privatev1.ComputeInstanceVolumeRegistration_builder{
 								DiskKey: "boot",
-								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 							}.Build(),
 						},
 						Conditions: []*privatev1.ComputeInstanceCondition{
@@ -1072,7 +1072,7 @@ var _ = Describe("Private compute instances server", func() {
 					VolumeRegistration: []*privatev1.ComputeInstanceVolumeRegistration{
 						privatev1.ComputeInstanceVolumeRegistration_builder{
 							DiskKey: "boot",
-							State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+							State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 						}.Build(),
 					},
 				}.Build(),

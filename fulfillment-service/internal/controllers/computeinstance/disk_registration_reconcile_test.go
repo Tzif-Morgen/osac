@@ -41,7 +41,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		volumesClient.create = func(_ context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
 			createCalls++
 			Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
-				privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 			Expect(request.GetObject().GetMetadata().GetName()).To(Equal("ci-" + diskRegistrationTestID + "-boot"))
 			Expect(request.GetObject().GetMetadata().GetTenant()).To(Equal("tenant-a"))
 			Expect(request.GetObject().GetMetadata().GetProject()).To(BeEmpty())
@@ -138,7 +138,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(complete).To(BeFalse())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 
 		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
@@ -170,7 +170,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		}
 		Expect(createCalls).To(Equal(1))
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 	})
 
 	It("marks only explicit pre-commit rejections retryable", func() {
@@ -227,7 +227,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			computeClient.object.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 				privatev1.ComputeInstanceVolumeRegistration_builder{
 					DiskKey: "boot",
-					State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+					State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 				}.Build(),
 			})
 			volumesClient.list = list(volumesClient)
@@ -242,7 +242,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			Expect(volumesClient.createRequests).To(BeEmpty())
 			Expect(volumesClient.listRequests).To(HaveLen(expectedListCalls))
 			Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
-				privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		},
 		Entry("empty result", func(_ *registrationVolumesClient) func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
 			return func(context.Context, *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
@@ -346,7 +346,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		computeClient.object.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "boot",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 		volumesClient.list = func(_ context.Context, request *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
@@ -367,7 +367,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		computeClient.object.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
 			privatev1.ComputeInstanceVolumeRegistration_builder{
 				DiskKey: "boot",
-				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 			}.Build(),
 		})
 		volumesClient.list = func(_ context.Context, _ *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
@@ -437,7 +437,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(complete).To(BeFalse())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 
 		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())

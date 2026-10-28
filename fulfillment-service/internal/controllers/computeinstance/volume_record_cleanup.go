@@ -71,7 +71,7 @@ func diskRegistrationRecoveryNeeded(instance *privatev1.ComputeInstance) (bool, 
 		return false, err
 	}
 	for diskKey, registration := range registrations {
-		if registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN && volumes[diskKey] == nil {
+		if registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN && volumes[diskKey] == nil {
 			return true, nil
 		}
 	}
@@ -103,7 +103,7 @@ func (t *task) reconcileVolumeRecordCleanup(
 		case privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE:
 			continue
-		case privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN:
+		case privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN:
 			registrationPending = true
 			t.logVolumeCleanupPending(ctx, instance.GetId(), diskKey, "registration outcome is still uncertain", "")
 		case privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED:

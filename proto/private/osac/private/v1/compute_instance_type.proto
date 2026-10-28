@@ -315,7 +315,7 @@ message ComputeInstanceVolumeRegistration {
     // The request is confirmed not to have created a Volume.
     STATE_NON_COMMITTED_FAILURE = 2;
     // The request may have created a Volume, but its result is unknown.
-    STATE_UNCERTAIN = 3;
+    STATE_UNKNOWN = 3;
     // The Volume ID is recorded in the public correlation list.
     STATE_RESOLVED = 4;
   }

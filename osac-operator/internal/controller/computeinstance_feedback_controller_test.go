@@ -790,7 +790,7 @@ var _ = Describe("ComputeInstanceFeedbackReconciler", func() {
 							}.Build(),
 							privatev1.ComputeInstanceVolumeRegistration_builder{
 								DiskKey: "disk-1",
-								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 							}.Build(),
 						},
 					},
@@ -830,7 +830,7 @@ var _ = Describe("ComputeInstanceFeedbackReconciler", func() {
 				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 			Expect(mockClient.lastUpdate.GetStatus().GetVolumeRegistration()[1].GetDiskKey()).To(Equal("disk-1"))
 			Expect(mockClient.lastUpdate.GetStatus().GetVolumeRegistration()[1].GetState()).To(
-				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		})
 
 		It("should signal and remove finalizer when it's the last one", func() {
@@ -1144,7 +1144,7 @@ var _ = Describe("ComputeInstanceFeedbackReconciler", func() {
 							}.Build(),
 							privatev1.ComputeInstanceVolumeRegistration_builder{
 								DiskKey: "disk-1",
-								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
 							}.Build(),
 						},
 					},
@@ -1200,7 +1200,7 @@ var _ = Describe("ComputeInstanceFeedbackReconciler", func() {
 			Expect(mockClient.lastUpdate.GetStatus().GetVolumeRegistration()[0].GetState()).To(
 				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 			Expect(mockClient.lastUpdate.GetStatus().GetVolumeRegistration()[1].GetState()).To(
-				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				Equal(privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		})
 
 		It("should sync ConfigurationApplied condition", func() {

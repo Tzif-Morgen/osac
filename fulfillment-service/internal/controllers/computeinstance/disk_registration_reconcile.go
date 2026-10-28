@@ -147,7 +147,7 @@ func reconcileDiskRegistrationCandidate(
 		return nil
 	}
 	switch registration.GetState() {
-	case privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN:
+	case privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN:
 		return recoverUncertainDiskRegistration(ctx, computeInstancesClient, volumesClient,
 			current, candidate)
 	case privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
@@ -258,7 +258,7 @@ func reloadClaimedDiskRegistration(
 	}
 	if _, exists := volumes[candidate.diskKey]; exists ||
 		registrations[candidate.diskKey] == nil ||
-		registrations[candidate.diskKey].GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN ||
+		registrations[candidate.diskKey].GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN ||
 		current.GetMetadata().HasDeletionTimestamp() {
 		return nil, preparedDiskRegistration{}, false, nil
 	}
@@ -368,7 +368,7 @@ func persistDiskRegistrationState(
 		return false, nil
 	}
 	registration := registrationByKey[diskKey]
-	if registration.GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN {
+	if registration.GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN {
 		return false, nil
 	}
 	if registration.GetState() == state {
