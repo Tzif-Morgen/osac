@@ -163,8 +163,8 @@ func (t *task) deleteAndConfirmVolumeRecord(
 	if err != nil || !found {
 		return false, err
 	}
-	if volumeRecordDeletionPending(volume) {
-		t.logVolumeCleanupPending(ctx, instance.GetId(), diskKey, "deletion is still in progress", volumeID)
+	if volumeRecordDeletionStarted(volume) {
+		t.logVolumeCleanupPending(ctx, instance.GetId(), diskKey, "waiting for Volume record removal", volumeID)
 		return true, nil
 	}
 
@@ -226,7 +226,8 @@ func validateVolumeRecordForParent(
 	return nil
 }
 
-func volumeRecordDeletionPending(volume *privatev1.Volume) bool {
+// DELETED means backend cleanup completed; the Volume record may still be visible.
+func volumeRecordDeletionStarted(volume *privatev1.Volume) bool {
 	return volume.GetMetadata().HasDeletionTimestamp() ||
 		volume.GetStatus().GetState() == privatev1.VolumeState_VOLUME_STATE_DELETING ||
 		volume.GetStatus().GetState() == privatev1.VolumeState_VOLUME_STATE_DELETED
