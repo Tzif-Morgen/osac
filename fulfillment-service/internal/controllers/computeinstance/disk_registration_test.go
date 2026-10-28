@@ -18,6 +18,7 @@ package computeinstance
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -148,11 +149,16 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 			func(_ context.Context, request *privatev1.ComputeInstancesUpdateRequest, _ ...grpc.CallOption) (*privatev1.ComputeInstancesUpdateResponse, error) {
 				Expect(request.GetLock()).To(BeTrue())
 				Expect(request.GetObject().GetMetadata().GetVersion()).To(Equal(int32(6)))
+				Expect(request.GetUpdateMask().GetPaths()).To(Equal([]string{
+					computeInstanceDiskRegistrationUpdateMask, "status.conditions"}))
 				Expect(registrationStates(request.GetObject())).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
 					"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
 					"disk-1": privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 					"disk-2": privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED,
 				}))
+				Expect(request.GetObject().GetStatus().GetConditions()).To(ContainElement(WithTransform(
+					func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
+					Equal("VolumeRegistrationPending"))))
 				persisted = commitDiskRegistrationUpdate(persisted, request)
 				return privatev1.ComputeInstancesUpdateResponse_builder{Object: proto.Clone(persisted).(*privatev1.ComputeInstance)}.Build(), nil
 			})
@@ -306,7 +312,8 @@ var _ = Describe("ComputeInstance disk registration claim", func() {
 		client.EXPECT().Update(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, request *privatev1.ComputeInstancesUpdateRequest, _ ...grpc.CallOption) (*privatev1.ComputeInstancesUpdateResponse, error) {
 				Expect(request.GetLock()).To(BeTrue())
-				Expect(request.GetUpdateMask().GetPaths()).To(Equal([]string{computeInstanceDiskRegistrationUpdateMask}))
+				Expect(request.GetUpdateMask().GetPaths()).To(Equal([]string{
+					computeInstanceDiskRegistrationUpdateMask, "status.conditions"}))
 				Expect(request.GetObject().GetStatus().GetVolumes()).To(Equal(current.GetStatus().GetVolumes()))
 				Expect(registrationStates(request.GetObject())).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
 					"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
@@ -408,6 +415,9 @@ func commitDiskRegistrationUpdate(
 ) *privatev1.ComputeInstance {
 	updated := proto.Clone(current).(*privatev1.ComputeInstance)
 	updated.GetStatus().SetVolumeRegistration(cloneDiskRegistrations(request.GetObject().GetStatus().GetVolumeRegistration()))
+	if slices.Contains(request.GetUpdateMask().GetPaths(), "status.conditions") {
+		updated.GetStatus().SetConditions(proto.Clone(request.GetObject().GetStatus()).(*privatev1.ComputeInstanceStatus).GetConditions())
+	}
 	updated.GetMetadata().SetVersion(current.GetMetadata().GetVersion() + 1)
 	return updated
 }

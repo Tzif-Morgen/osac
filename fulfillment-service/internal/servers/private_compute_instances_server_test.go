@@ -1030,9 +1030,17 @@ var _ = Describe("Private compute instances server", func() {
 								State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
 							}.Build(),
 						},
+						Conditions: []*privatev1.ComputeInstanceCondition{
+							privatev1.ComputeInstanceCondition_builder{
+								Type:    privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+								Status:  privatev1.ConditionStatus_CONDITION_STATUS_FALSE,
+								Reason:  proto.String("VolumeRegistrationPending"),
+								Message: proto.String("Disk Volume IDs persisted: 0/1; blocked disks: boot; recovery pending."),
+							}.Build(),
+						},
 					}.Build(),
 				}.Build(),
-				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.volume_registration"}},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.volume_registration", "status.conditions"}},
 				Lock:       true,
 			}.Build()
 
@@ -1069,6 +1077,9 @@ var _ = Describe("Private compute instances server", func() {
 					},
 				}.Build(),
 			)).To(BeTrue())
+			Expect(persisted.GetObject().GetStatus().GetConditions()).To(ContainElement(WithTransform(
+				func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
+				Equal("VolumeRegistrationPending"))))
 		})
 
 		It("preserves both disk status lists across concurrent masked status updates", func() {

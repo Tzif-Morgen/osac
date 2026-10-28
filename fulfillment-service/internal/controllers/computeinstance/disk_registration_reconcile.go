@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/controllers/finalizers"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
@@ -578,6 +579,55 @@ func diskRegistrationsComplete(instance *privatev1.ComputeInstance, prepared []p
 		}
 	}
 	return true, nil
+}
+
+// diskRegistrationProgress describes only durable registration state. In
+// particular, a transport error is never included in the public condition.
+func diskRegistrationProgress(instance *privatev1.ComputeInstance) (bool, string, string, error) {
+	prepared, err := prepareDiskRegistrations(instance)
+	if err != nil {
+		return false, "", "", err
+	}
+	registrations, err := diskRegistrationByKey(instance.GetStatus().GetVolumeRegistration())
+	if err != nil {
+		return false, "", "", err
+	}
+	volumes, err := diskVolumesByKey(instance.GetStatus().GetVolumes())
+	if err != nil {
+		return false, "", "", err
+	}
+	if err := validateDiskRegistrationKeys(instance, prepared, registrations, volumes); err != nil {
+		return false, "", "", err
+	}
+	blockers := make([]string, 0, len(prepared))
+	resolved := 0
+	failed := false
+	for _, candidate := range prepared {
+		registration := registrations[candidate.diskKey]
+		volume := volumes[candidate.diskKey]
+		if volume != nil && volume.GetVolumeId() != "" {
+			resolved++
+		}
+		if registration != nil && registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED &&
+			volume != nil && volume.GetVolumeId() != "" {
+			continue
+		}
+		blockers = append(blockers, candidate.diskKey)
+		if registration != nil && registration.GetState() == privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE {
+			failed = true
+		}
+	}
+	if len(blockers) == 0 {
+		return true, "WaitingForVM", "All disk Volume IDs are registered; waiting for the VM.", nil
+	}
+	message := fmt.Sprintf("Disk Volume IDs persisted: %d/%d; blocked disks: %s; ",
+		resolved, len(prepared), strings.Join(blockers, ", "))
+	if failed {
+		return false, "VolumeRegistrationFailed", message +
+			"Volume creation was rejected without a commit; retrying registration.", nil
+	}
+	return false, "VolumeRegistrationPending", message +
+		"registration or recovery is pending.", nil
 }
 
 const diskRegistrationListPageSize = 100

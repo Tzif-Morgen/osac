@@ -28,6 +28,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"slices"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -67,6 +68,19 @@ const userDataSecretKey = "userdata"
 // setReconciliationFailed, but transient errors should just be retried, leaving the compute
 // instance's state untouched so it doesn't look like a permanent failure while it is retried.
 var errTransientK8sError = errors.New("transient kubernetes error")
+
+// Registration errors retain their private detail for the retry log, while the
+// public PROVISIONED condition is derived separately from persisted state.
+var errDiskRegistrationRetry = errors.New("disk registration retry")
+
+func diskRegistrationRetry(err error) error {
+	if err != nil {
+		err = fmt.Errorf("%w: %w", errDiskRegistrationRetry, err)
+	} else {
+		err = errDiskRegistrationRetry
+	}
+	return controllers.RequeueAfter(err, time.Second)
+}
 
 // SecretResolutionError classifies a failure while resolving the Secret referenced
 // by the ComputeInstance SSH key field.
@@ -110,6 +124,7 @@ type function struct {
 type task struct {
 	r                  *function
 	computeInstance    *privatev1.ComputeInstance
+	registeredVolumes  []*privatev1.ComputeInstanceVolume
 	hubId              string
 	hubNamespace       string
 	hubClient          clnt.Client
@@ -215,7 +230,8 @@ func (r *function) run(ctx context.Context, computeInstance *privatev1.ComputeIn
 				proto.Reset(computeInstance)
 				proto.Merge(computeInstance, oldComputeInstance)
 			}
-		} else if !errors.Is(reconcileErr, errTransientK8sError) && !controllers.IsRequeueable(reconcileErr) {
+		} else if !errors.Is(reconcileErr, errTransientK8sError) &&
+			!errors.Is(reconcileErr, errDiskRegistrationRetry) && !controllers.IsRequeueable(reconcileErr) {
 			t.setReconciliationFailed(reconcileErr)
 		}
 	}
@@ -277,6 +293,13 @@ func (t *task) update(ctx context.Context) error {
 	object, err := t.getKubeObject(ctx)
 	if err != nil {
 		return err
+	}
+	ready, err := t.reconcileDiskRegistrationForWorkload(ctx, object == nil)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		return nil
 	}
 
 	// Set the user data Secret name if user data is provided (no K8s call yet):
@@ -366,6 +389,57 @@ func (t *task) update(ctx context.Context) error {
 	}
 
 	return t.reconcileAutoExternalIPAttachment(ctx)
+}
+
+func (t *task) reconcileDiskRegistrationForWorkload(ctx context.Context, workloadAbsent bool) (bool, error) {
+	reconcileRegistration := workloadAbsent && t.computeInstance.GetSpec().GetBootDisk() != nil
+	if !reconcileRegistration && len(t.computeInstance.GetStatus().GetVolumeRegistration()) > 0 {
+		prepared, err := prepareDiskRegistrations(t.computeInstance)
+		if err != nil {
+			return false, err
+		}
+		complete, err := diskRegistrationsComplete(t.computeInstance, prepared)
+		if err != nil {
+			return false, err
+		}
+		reconcileRegistration = !complete
+	}
+	if !reconcileRegistration {
+		return true, nil
+	}
+	_, registrationErr := ReconcileDiskRegistrations(
+		ctx, t.r.computeInstancesClient, t.r.volumesClient, t.computeInstance.GetId())
+	latest, err := getComputeInstanceForDiskRegistration(ctx, t.r.computeInstancesClient, t.computeInstance.GetId())
+	if err != nil {
+		t.updateCondition(privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+			privatev1.ConditionStatus_CONDITION_STATUS_FALSE, "VolumeRegistrationPending",
+			"Disk registration status is unavailable; retrying.")
+		return false, diskRegistrationRetry(err)
+	}
+	if !hasDiskRegistrationFinalizer(latest) || latest.GetMetadata().HasDeletionTimestamp() {
+		return false, nil
+	}
+	complete, reason, message, err := diskRegistrationProgress(latest)
+	if err != nil {
+		t.updateCondition(privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+			privatev1.ConditionStatus_CONDITION_STATUS_FALSE, "VolumeRegistrationPending",
+			"Disk registration status is unavailable; retrying.")
+		return false, diskRegistrationRetry(err)
+	}
+	// The registration helper commits IDs and conditions independently. Copy
+	// only the latest conditions so the outer field mask cannot resend stale
+	// registration state or Volume IDs.
+	t.computeInstance.GetStatus().SetConditions(proto.Clone(latest.GetStatus()).(*privatev1.ComputeInstanceStatus).GetConditions())
+	t.updateCondition(privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+		privatev1.ConditionStatus_CONDITION_STATUS_FALSE, reason, message)
+	if registrationErr != nil {
+		return false, diskRegistrationRetry(registrationErr)
+	}
+	if !complete {
+		return false, diskRegistrationRetry(nil)
+	}
+	t.registeredVolumes = latest.GetStatus().GetVolumes()
+	return true, nil
 }
 
 func (t *task) setDefaults() {
@@ -1190,7 +1264,11 @@ func (t *task) addExplicitFields(ctx context.Context, spec *osacv1alpha1.Compute
 }
 
 func (t *task) addDiskVolumeIDs(spec *osacv1alpha1.ComputeInstanceSpec) error {
-	volumes, err := diskVolumesByKey(t.computeInstance.GetStatus().GetVolumes())
+	volumeEntries := t.computeInstance.GetStatus().GetVolumes()
+	if t.registeredVolumes != nil {
+		volumeEntries = t.registeredVolumes
+	}
+	volumes, err := diskVolumesByKey(volumeEntries)
 	if err != nil {
 		return err
 	}

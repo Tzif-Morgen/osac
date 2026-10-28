@@ -41,7 +41,6 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const diskRegistrationKubeHoldFinalizer = "osac-test.osac.io/hold-compute-instance-cleanup"
 const diskRegistrationVolumeHoldFinalizer = "osac-test.osac.io/hold-volume-record-cleanup"
 
 var _ = Describe("ComputeInstance Volume registration API contract", func() {
@@ -132,6 +131,9 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
 		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
+		Expect(uncertain.GetStatus().GetConditions()).To(ContainElement(WithTransform(
+			func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
+			Equal("VolumeRegistrationPending"))))
 
 		By("restarting from the persisted parent ID and recovering through the real private List API")
 		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
@@ -313,6 +315,9 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 				Expect(getErr).NotTo(HaveOccurred())
 				Expect(diskRegistrationState(observed, "boot")).To(Equal(
 					privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+				Expect(observed.GetStatus().GetConditions()).To(ContainElement(WithTransform(
+					func(condition *privatev1.ComputeInstanceCondition) string { return condition.GetReason() },
+					Equal("VolumeRegistrationPending"))))
 				found, listErr := volumes.List(ctx, privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
 				Expect(listErr).NotTo(HaveOccurred())
 				Expect(found.GetTotal()).To(BeZero())
@@ -339,25 +344,47 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(diskRegistrationState(retained, "boot")).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
 
-		By("canceling while a fixture-owned Kubernetes finalizer keeps the parent cleanup path open")
-		computeInstanceCR := waitForDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
+		By("keeping the managed workload absent while the attempt is unresolved")
+		assertNoDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
+
+		By("canceling before any Volume ID or managed workload exists")
 		DeferCleanup(func(cleanupCtx context.Context) {
-			current := &osacv1alpha1.ComputeInstance{}
-			getErr := tool.KubeClient().Get(cleanupCtx,
-				crclient.ObjectKeyFromObject(computeInstanceCR), current)
-			if getErr == nil && slices.Contains(current.GetFinalizers(), diskRegistrationKubeHoldFinalizer) {
-				current.SetFinalizers(slices.DeleteFunc(current.GetFinalizers(), func(value string) bool {
-					return value == diskRegistrationKubeHoldFinalizer
-				}))
-				Expect(tool.KubeClient().Update(cleanupCtx, current)).To(Succeed())
+			// The uncertain marker deliberately retains the parent. This fixture
+			// knows that Create was never dispatched, so it can clear that marker
+			// after the assertions and let normal cancellation cleanup finish.
+			released := false
+			Eventually(func(g Gomega) {
+				current, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+				if status.Code(getErr) == codes.NotFound {
+					return
+				}
+				g.Expect(getErr).NotTo(HaveOccurred())
+				if !current.GetMetadata().HasDeletionTimestamp() {
+					return
+				}
+				for _, registration := range current.GetStatus().GetVolumeRegistration() {
+					if registration.GetDiskKey() == "boot" {
+						registration.SetState(privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE)
+					}
+				}
+				_, updateErr := computeInstances.Update(cleanupCtx, privatev1.ComputeInstancesUpdateRequest_builder{
+					Object:     current,
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.volume_registration"}},
+					Lock:       true,
+				}.Build())
+				g.Expect(updateErr).NotTo(HaveOccurred())
+				released = true
+			}, time.Minute, time.Second).Should(Succeed())
+			if released {
+				_, signalErr := computeInstances.Signal(cleanupCtx,
+					privatev1.ComputeInstancesSignalRequest_builder{Id: instance.GetId()}.Build())
+				Expect(signalErr == nil || status.Code(signalErr) == codes.NotFound).To(BeTrue())
+				Eventually(func(g Gomega) {
+					_, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+					g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+				}, 2*time.Minute, time.Second).Should(Succeed())
 			}
-			_, signalErr := computeInstances.Signal(cleanupCtx, privatev1.ComputeInstancesSignalRequest_builder{Id: instance.GetId()}.Build())
-			Expect(signalErr == nil || status.Code(signalErr) == codes.NotFound).To(BeTrue())
 		})
-		if !slices.Contains(computeInstanceCR.GetFinalizers(), diskRegistrationKubeHoldFinalizer) {
-			computeInstanceCR.SetFinalizers(append(computeInstanceCR.GetFinalizers(), diskRegistrationKubeHoldFinalizer))
-			Expect(tool.KubeClient().Update(ctx, computeInstanceCR)).To(Succeed())
-		}
 		publicInstances := publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
 		_, err = publicInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: instance.GetId()}.Build())
 		Expect(err).NotTo(HaveOccurred())
@@ -368,7 +395,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			g.Expect(deleting.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
 		}, time.Minute, time.Second).Should(Succeed())
 
-		By("keeping the uncertain request and finalizer through repeated cancellation reconciles")
+		By("retaining the uncertain intent during repeated cancellation reconciles")
 		for range 3 {
 			complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
 			Expect(err).NotTo(HaveOccurred())
@@ -376,12 +403,16 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		}
 		Expect(countedVolumes.createCalls).To(BeZero())
 		Expect(countedVolumes.listCalls).To(Equal(6))
+		remaining, err := volumes.List(ctx, privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(remaining.GetTotal()).To(BeZero())
 		cancelled, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cancelled.GetMetadata().HasDeletionTimestamp()).To(BeTrue())
 		Expect(cancelled.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
 		Expect(diskRegistrationState(cancelled, "boot")).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+		assertNoDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
 	})
 
 	It("retains the parent until its saved Volume ID is confirmed absent", func(ctx context.Context) {
@@ -461,18 +492,15 @@ func waitForDiskRegistrationFinalizer(ctx context.Context, client privatev1.Comp
 	}, time.Minute, time.Second).Should(Succeed())
 }
 
-func waitForDiskRegistrationComputeInstanceCR(ctx context.Context, id string) *osacv1alpha1.ComputeInstance {
+func assertNoDiskRegistrationComputeInstanceCR(ctx context.Context, id string) {
 	GinkgoHelper()
-	var result *osacv1alpha1.ComputeInstance
-	Eventually(func(g Gomega) {
+	Consistently(func(g Gomega) {
 		objects := &osacv1alpha1.ComputeInstanceList{}
 		g.Expect(tool.KubeClient().List(ctx, objects,
 			crclient.MatchingLabels{labels.ComputeInstanceUuid: id},
 		)).To(Succeed())
-		g.Expect(objects.Items).To(HaveLen(1))
-		result = &objects.Items[0]
-	}, time.Minute, time.Second).Should(Succeed())
-	return result
+		g.Expect(objects.Items).To(BeEmpty())
+	}, 3*time.Second, 250*time.Millisecond).Should(Succeed())
 }
 
 func getDiskRegistrationComputeInstance(ctx context.Context, client privatev1.ComputeInstancesClient, id string) (*privatev1.ComputeInstance, error) {

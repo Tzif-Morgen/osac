@@ -50,6 +50,7 @@ import (
 	"github.com/osac-project/osac/fulfillment-service/internal/kubernetes/annotations"
 	"github.com/osac-project/osac/fulfillment-service/internal/kubernetes/gvks"
 	"github.com/osac-project/osac/fulfillment-service/internal/kubernetes/labels"
+	"github.com/osac-project/osac/fulfillment-service/internal/masks"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 )
 
@@ -708,6 +709,307 @@ var _ = Describe("disk Volume ID handoff", func() {
 
 		_, err := t.buildSpecWithNetworkAttachments(context.Background(), false)
 		Expect(err).To(MatchError(ContainSubstring("empty persisted Volume ID")))
+	})
+})
+
+var _ = Describe("disk registration handoff from the reconciler", func() {
+	const hubID = "hub-for-disk-registration"
+	const hubNamespace = "disk-registration-hub"
+
+	newInstance := func() *privatev1.ComputeInstance {
+		instance := diskRegistrationTestInstance()
+		instance.GetMetadata().SetVersion(1)
+		instance.GetStatus().SetHub(hubID)
+		instance.GetSpec().SetInstanceType(&privatev1.InstanceTypeReference{Name: "small"})
+		return instance
+	}
+	provisioned := func(instance *privatev1.ComputeInstance) *privatev1.ComputeInstanceCondition {
+		for _, condition := range instance.GetStatus().GetConditions() {
+			if condition.GetType() == privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED {
+				return condition
+			}
+		}
+		Fail("PROVISIONED condition is missing")
+		return nil
+	}
+
+	newHarness := func(
+		ctrl *gomock.Controller,
+		instance *privatev1.ComputeInstance,
+		volumesClient *registrationVolumesClient,
+		interceptors interceptor.Funcs,
+		objects ...clnt.Object,
+	) (*function, *registrationComputeInstancesClient, clnt.Client) {
+		scheme := runtime.NewScheme()
+		Expect(osacv1alpha1.AddToScheme(scheme)).To(Succeed())
+		hubClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(objects...).
+			WithInterceptorFuncs(interceptors).
+			Build()
+		hubCache := controllers.NewMockHubCache(ctrl)
+		hubCache.EXPECT().Get(gomock.Any(), hubID).Return(&controllers.HubEntry{
+			Namespace: hubNamespace,
+			Client:    hubClient,
+		}, nil).AnyTimes()
+		instanceTypesClient := NewMockInstanceTypesClient(ctrl)
+		instanceTypesClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return(
+			privatev1.InstanceTypesGetResponse_builder{
+				Object: privatev1.InstanceType_builder{Spec: privatev1.InstanceTypeSpec_builder{}.Build()}.Build(),
+			}.Build(), nil,
+		).AnyTimes()
+		computeClient := &registrationComputeInstancesClient{
+			object: proto.Clone(instance).(*privatev1.ComputeInstance),
+		}
+		return &function{
+			logger:                 logger,
+			hubCache:               hubCache,
+			computeInstancesClient: computeClient,
+			volumesClient:          volumesClient,
+			instanceTypesClient:    instanceTypesClient,
+			maskCalculator:         masks.NewCalculator().Build(),
+		}, computeClient, hubClient
+	}
+
+	It("persists every disk ID before creating the first managed ComputeInstance", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		volumesClient := &registrationVolumesClient{}
+		var computeClient *registrationComputeInstancesClient
+		created := 0
+		f, stored, hubClient := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{
+			Create: func(ctx context.Context, client clnt.WithWatch, object clnt.Object, options ...clnt.CreateOption) error {
+				if cr, ok := object.(*osacv1alpha1.ComputeInstance); ok {
+					created++
+					Expect(computeClient.object.GetStatus().GetVolumes()).To(HaveLen(3))
+					Expect(registrationStates(computeClient.object)).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
+						"boot":   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+						"disk-1": privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+						"disk-2": privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
+					}))
+					Expect(cr.Spec.DiskVolumeIDs).To(Equal(map[string]string{
+						"boot":   "volume-boot",
+						"disk-1": "volume-disk-1",
+						"disk-2": "volume-disk-2",
+					}))
+				}
+				return client.Create(ctx, object, options...)
+			},
+		})
+		computeClient = stored
+		volumesClient.create = func(ctx context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			Expect(created).To(BeZero())
+			name := request.GetObject().GetMetadata().GetName()
+			Expect(name).To(HavePrefix("ci-" + diskRegistrationTestID + "-"))
+			diskKey := name[len("ci-"+diskRegistrationTestID+"-"):]
+			Expect(registrationStates(computeClient.object)[diskKey]).To(Equal(
+				privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN))
+			Expect(provisioned(computeClient.object).GetReason()).To(Equal("VolumeRegistrationPending"))
+			return privatev1.VolumesCreateResponse_builder{
+				Object: registrationTestVolume(request, "volume-"+diskKey, "system"),
+			}.Build(), nil
+		}
+
+		Expect(f.run(context.Background(), instance)).To(Succeed())
+		Expect(volumesClient.createRequests).To(HaveLen(3))
+		Expect(created).To(Equal(1))
+		list := &osacv1alpha1.ComputeInstanceList{}
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(1))
+		outerUpdates := 0
+		for _, request := range computeClient.updateRequests {
+			if request.GetLock() {
+				continue
+			}
+			outerUpdates++
+			Expect(request.GetUpdateMask().GetPaths()).NotTo(ContainElement("status.volumes"))
+			Expect(request.GetUpdateMask().GetPaths()).NotTo(ContainElement("status.volume_registration"))
+		}
+		Expect(outerUpdates).To(BeNumerically(">", 0))
+	})
+
+	It("blocks the managed CR during uncertainty and reuses the recovered ID", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		volumesClient := &registrationVolumesClient{}
+		f, computeClient, hubClient := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{})
+		var ambiguousRequest *privatev1.VolumesCreateRequest
+		createCalls := map[string]int{}
+		volumesClient.create = func(_ context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			name := request.GetObject().GetMetadata().GetName()
+			createCalls[name]++
+			switch name {
+			case "ci-" + diskRegistrationTestID + "-disk-1":
+				ambiguousRequest = proto.Clone(request).(*privatev1.VolumesCreateRequest)
+				return nil, status.Error(codes.Unavailable, "response lost")
+			case "ci-" + diskRegistrationTestID + "-boot":
+				return privatev1.VolumesCreateResponse_builder{
+					Object: registrationTestVolume(request, "volume-boot", "system"),
+				}.Build(), nil
+			default:
+				return privatev1.VolumesCreateResponse_builder{
+					Object: registrationTestVolume(request, "volume-disk-2", "system"),
+				}.Build(), nil
+			}
+		}
+		listCalls := 0
+		volumesClient.list = func(_ context.Context, _ *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			listCalls++
+			if listCalls == 1 {
+				return registrationTestListResponse(nil, 0), nil
+			}
+			return registrationTestListResponse([]*privatev1.Volume{
+				registrationTestVolume(ambiguousRequest, "volume-original", "system"),
+			}, 1), nil
+		}
+
+		Expect(controllers.IsRequeueable(f.run(context.Background(), instance))).To(BeTrue())
+		Expect(computeClient.object.GetStatus().GetVolumes()).To(HaveLen(1))
+		condition := provisioned(computeClient.object)
+		Expect(condition.GetReason()).To(Equal("VolumeRegistrationPending"))
+		Expect(condition.GetMessage()).To(ContainSubstring("1/3"))
+		Expect(condition.GetMessage()).To(ContainSubstring("disk-1"))
+		Expect(condition.GetMessage()).To(ContainSubstring("disk-2"))
+		Expect(condition.GetMessage()).NotTo(ContainSubstring("response lost"))
+		list := &osacv1alpha1.ComputeInstanceList{}
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(BeEmpty())
+
+		restarted := proto.Clone(computeClient.object).(*privatev1.ComputeInstance)
+		Expect(f.run(context.Background(), restarted)).To(Succeed())
+		Expect(createCalls["ci-"+diskRegistrationTestID+"-boot"]).To(Equal(1))
+		Expect(createCalls["ci-"+diskRegistrationTestID+"-disk-1"]).To(Equal(1))
+		Expect(createCalls["ci-"+diskRegistrationTestID+"-disk-2"]).To(Equal(1))
+		Expect(provisioned(computeClient.object).GetReason()).To(Equal("WaitingForVM"))
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(1))
+		Expect(list.Items[0].Spec.DiskVolumeIDs).To(Equal(map[string]string{
+			"boot":   "volume-boot",
+			"disk-1": "volume-original",
+			"disk-2": "volume-disk-2",
+		}))
+	})
+
+	It("reports a confirmed non-commit safely and switches to Pending on retry claim", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		instance.GetSpec().SetAdditionalDisks(nil)
+		volumesClient := &registrationVolumesClient{}
+		f, computeClient, hubClient := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{})
+		createCalls := 0
+		volumesClient.create = func(_ context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			createCalls++
+			Expect(provisioned(computeClient.object).GetReason()).To(Equal("VolumeRegistrationPending"))
+			if createCalls == 1 {
+				return nil, status.Error(codes.InvalidArgument, "private provider detail")
+			}
+			return privatev1.VolumesCreateResponse_builder{
+				Object: registrationTestVolume(request, "volume-boot", "system"),
+			}.Build(), nil
+		}
+
+		Expect(controllers.IsRequeueable(f.run(context.Background(), instance))).To(BeTrue())
+		condition := provisioned(computeClient.object)
+		Expect(condition.GetReason()).To(Equal("VolumeRegistrationFailed"))
+		Expect(condition.GetMessage()).To(ContainSubstring("boot"))
+		Expect(condition.GetMessage()).To(ContainSubstring("0/1"))
+		Expect(condition.GetMessage()).To(ContainSubstring("retry"))
+		Expect(condition.GetMessage()).NotTo(ContainSubstring("private provider detail"))
+		list := &osacv1alpha1.ComputeInstanceList{}
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(BeEmpty())
+
+		restarted := proto.Clone(computeClient.object).(*privatev1.ComputeInstance)
+		Expect(f.run(context.Background(), restarted)).To(Succeed())
+		Expect(createCalls).To(Equal(2))
+		Expect(provisioned(computeClient.object).GetReason()).To(Equal("WaitingForVM"))
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(1))
+	})
+
+	It("requeues an uncertain disk after a complete empty recovery lookup", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		instance.GetSpec().SetAdditionalDisks(nil)
+		volumesClient := &registrationVolumesClient{}
+		f, computeClient, hubClient := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{})
+		volumesClient.create = func(_ context.Context, _ *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			return nil, status.Error(codes.Unavailable, "lost response")
+		}
+		volumesClient.list = func(_ context.Context, _ *privatev1.VolumesListRequest) (*privatev1.VolumesListResponse, error) {
+			return registrationTestListResponse(nil, 0), nil
+		}
+
+		Expect(controllers.IsRequeueable(f.run(context.Background(), instance))).To(BeTrue())
+		restarted := proto.Clone(computeClient.object).(*privatev1.ComputeInstance)
+		Expect(controllers.IsRequeueable(f.run(context.Background(), restarted))).To(BeTrue())
+		Expect(volumesClient.createRequests).To(HaveLen(1))
+		Expect(volumesClient.listRequests).To(HaveLen(2))
+		Expect(provisioned(computeClient.object).GetReason()).To(Equal("VolumeRegistrationPending"))
+		list := &osacv1alpha1.ComputeInstanceList{}
+		Expect(hubClient.List(context.Background(), list)).To(Succeed())
+		Expect(list.Items).To(BeEmpty())
+	})
+
+	It("continues an existing workload after all registration IDs are saved", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		instance.GetStatus().SetVolumes([]*privatev1.ComputeInstanceVolume{
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-boot"}.Build(),
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "disk-1", VolumeId: "volume-disk-1"}.Build(),
+			privatev1.ComputeInstanceVolume_builder{DiskKey: "disk-2", VolumeId: "volume-disk-2"}.Build(),
+		})
+		instance.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{DiskKey: "boot", State: privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED}.Build(),
+			privatev1.ComputeInstanceVolumeRegistration_builder{DiskKey: "disk-1", State: privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED}.Build(),
+			privatev1.ComputeInstanceVolumeRegistration_builder{DiskKey: "disk-2", State: privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED}.Build(),
+		})
+		volumesClient := &registrationVolumesClient{}
+		patches := 0
+		cr := newComputeInstanceCR(diskRegistrationTestID, hubNamespace, "registered", nil)
+		f, computeClient, _ := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{
+			Patch: func(ctx context.Context, client clnt.WithWatch, object clnt.Object, patch clnt.Patch, options ...clnt.PatchOption) error {
+				patches++
+				return client.Patch(ctx, object, patch, options...)
+			},
+		}, cr)
+		computeClient.getErr = errors.New("completed workloads should not restart registration")
+
+		Expect(f.run(context.Background(), instance)).To(Succeed())
+		Expect(patches).To(Equal(1))
+		Expect(volumesClient.createRequests).To(BeEmpty())
+		Expect(volumesClient.listRequests).To(BeEmpty())
+	})
+
+	It("holds an existing managed CR while its zero-ID intent remains uncertain", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		DeferCleanup(ctrl.Finish)
+		instance := newInstance()
+		instance.GetSpec().SetAdditionalDisks(nil)
+		instance.GetStatus().SetVolumeRegistration([]*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "boot", State: privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN,
+			}.Build(),
+		})
+		volumesClient := &registrationVolumesClient{}
+		patches := 0
+		cr := newComputeInstanceCR(diskRegistrationTestID, hubNamespace, "unresolved", nil)
+		f, _, _ := newHarness(ctrl, instance, volumesClient, interceptor.Funcs{
+			Patch: func(_ context.Context, _ clnt.WithWatch, _ clnt.Object, _ clnt.Patch, _ ...clnt.PatchOption) error {
+				patches++
+				return nil
+			},
+		}, cr)
+
+		Expect(controllers.IsRequeueable(f.run(context.Background(), instance))).To(BeTrue())
+		Expect(patches).To(BeZero())
+		Expect(volumesClient.createRequests).To(BeEmpty())
+		Expect(volumesClient.listRequests).To(HaveLen(1))
 	})
 })
 
@@ -2970,11 +3272,16 @@ var _ = Describe("hub persistence", func() {
 				VolumeRegistration: registrations,
 			}.Build(),
 		}.Build()
+		computeInstancesClient.EXPECT().
+			Get(gomock.Any(), gomock.Any()).
+			AnyTimes().
+			Return(privatev1.ComputeInstancesGetResponse_builder{Object: computeInstance}.Build(), nil)
 
 		f := &function{
 			logger:                 logger,
 			hubCache:               hubCache,
 			computeInstancesClient: computeInstancesClient,
+			volumesClient:          &registrationVolumesClient{},
 			hubsClient:             hubsClient,
 			instanceTypesClient:    mockInstanceTypesClient,
 			maskCalculator:         nil,

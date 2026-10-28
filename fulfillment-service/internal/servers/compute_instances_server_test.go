@@ -734,6 +734,38 @@ var _ = Describe("Compute instances server", func() {
 			stored, err := ciDao.Get().SetId(created.GetObject().GetId()).Do(ctx)
 			Expect(err).ToNot(HaveOccurred())
 			storedObject := stored.GetObject()
+			condition := func(reason, message string) *privatev1.ComputeInstanceCondition {
+				return privatev1.ComputeInstanceCondition_builder{
+					Type:   privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+					Status: privatev1.ConditionStatus_CONDITION_STATUS_FALSE,
+					Reason: proto.String(reason), Message: proto.String(message),
+				}.Build()
+			}
+			storedObject.SetStatus(privatev1.ComputeInstanceStatus_builder{
+				Conditions: []*privatev1.ComputeInstanceCondition{
+					condition("VolumeRegistrationPending", "Disk Volume IDs persisted: 0/1; blocked disks: boot; registration pending."),
+				},
+			}.Build())
+			_, err = ciDao.Update().SetObject(storedObject).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			pendingGet, err := server.Get(ctx, publicv1.ComputeInstancesGetRequest_builder{Id: created.GetObject().GetId()}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pendingGet.GetObject().GetStatus().GetVolumes()).To(BeEmpty())
+			Expect(pendingGet.GetObject().GetStatus().GetConditions()).To(ContainElement(WithTransform(
+				func(item *publicv1.ComputeInstanceCondition) string { return item.GetReason() },
+				Equal("VolumeRegistrationPending"))))
+			pendingList, err := server.List(ctx, publicv1.ComputeInstancesListRequest_builder{}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pendingList.GetItems()).To(ContainElement(WithTransform(
+				func(item *publicv1.ComputeInstance) string {
+					if item.GetId() != created.GetObject().GetId() {
+						return ""
+					}
+					return item.GetStatus().GetConditions()[0].GetReason()
+				}, Equal("VolumeRegistrationPending"))))
+			stored, err = ciDao.Get().SetId(created.GetObject().GetId()).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			storedObject = stored.GetObject()
 			storedObject.SetStatus(privatev1.ComputeInstanceStatus_builder{
 				Volumes: []*privatev1.ComputeInstanceVolume{
 					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-public"}.Build(),
@@ -743,6 +775,9 @@ var _ = Describe("Compute instances server", func() {
 						DiskKey: "boot",
 						State:   privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED,
 					}.Build(),
+				},
+				Conditions: []*privatev1.ComputeInstanceCondition{
+					condition("WaitingForVM", "All disk Volume IDs are registered; waiting for the VM."),
 				},
 			}.Build())
 			_, err = ciDao.Update().SetObject(storedObject).Do(ctx)
@@ -762,6 +797,7 @@ var _ = Describe("Compute instances server", func() {
 			Expect(ownerGet.GetObject().GetStatus().GetVolumes()).To(HaveLen(1))
 			Expect(ownerGet.GetObject().GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
 			Expect(ownerGet.GetObject().GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-public"))
+			Expect(ownerGet.GetObject().GetStatus().GetConditions()[0].GetReason()).To(Equal("WaitingForVM"))
 			ownerList, err := server.List(ctx, publicv1.ComputeInstancesListRequest_builder{}.Build())
 			Expect(err).ToNot(HaveOccurred())
 			var listedInstance *publicv1.ComputeInstance
@@ -775,6 +811,7 @@ var _ = Describe("Compute instances server", func() {
 			Expect(listedInstance.GetStatus().GetVolumes()).To(HaveLen(1))
 			Expect(listedInstance.GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
 			Expect(listedInstance.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-public"))
+			Expect(listedInstance.GetStatus().GetConditions()[0].GetReason()).To(Equal("WaitingForVM"))
 
 			// A same-tenant caller with access to a different project cannot see this instance.
 			projectName := "hidden-disk-project"

@@ -338,10 +338,17 @@ func claimDiskRegistration(
 	registration.SetState(privatev1.ComputeInstanceVolumeRegistration_STATE_UNCERTAIN)
 	updated := proto.Clone(current).(*privatev1.ComputeInstance)
 	updated.GetStatus().SetVolumeRegistration(registrations)
+	_, reason, message, err := diskRegistrationProgress(updated)
+	if err != nil {
+		return false, err
+	}
+	(&task{computeInstance: updated}).updateCondition(
+		privatev1.ComputeInstanceConditionType_COMPUTE_INSTANCE_CONDITION_TYPE_PROVISIONED,
+		privatev1.ConditionStatus_CONDITION_STATUS_FALSE, reason, message)
 	response, err := client.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
 		Object: updated,
 		UpdateMask: &fieldmaskpb.FieldMask{
-			Paths: []string{computeInstanceDiskRegistrationUpdateMask},
+			Paths: []string{computeInstanceDiskRegistrationUpdateMask, "status.conditions"},
 		},
 		Lock: true,
 	}.Build())

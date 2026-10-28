@@ -506,6 +506,10 @@ func (c *registrationComputeInstancesClient) Update(
 	if slices.Contains(paths, "status.volumes") {
 		c.object.GetStatus().SetVolumes(cloneComputeInstanceVolumes(request.GetObject().GetStatus().GetVolumes()))
 	}
+	if slices.Contains(paths, "status.conditions") {
+		status := proto.Clone(request.GetObject().GetStatus()).(*privatev1.ComputeInstanceStatus)
+		c.object.GetStatus().SetConditions(status.GetConditions())
+	}
 	c.object.GetMetadata().SetVersion(c.object.GetMetadata().GetVersion() + 1)
 	if err := c.failAfterUpdateCalls[call]; err != nil {
 		return nil, err
