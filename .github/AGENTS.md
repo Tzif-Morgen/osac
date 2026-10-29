@@ -94,3 +94,9 @@ workflow would silently never run even though the tag exists.
 Whatever creates such a tag must also verify each of that component's
 downstream publish workflows actually started and succeeded before reporting
 success; a tag existing is not evidence its publish happened.
+
+| Touched area | Required coverage | Repository-root command | Boundary |
+| --- | --- | --- | --- |
+| Umbrella release notes, package inventory, Latest selection, and Slack publication/staging notifications | [DEV] Unit | `python3 -m unittest discover -s .github/scripts -p test_umbrella_release.py -v` (requires PyYAML 6.0.3, Bash, and jq) | Runs the actual Python helpers and notification shell with synthetic chart archives and captured GitHub/Slack operations; no live publication or Konflux cluster. |
+
+See [release automation test boundaries](../docs/INTEGRATION-TESTING.md#release-automation).
