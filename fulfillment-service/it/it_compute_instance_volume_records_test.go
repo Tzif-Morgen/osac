@@ -532,6 +532,105 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		}, 2*time.Minute, time.Second).Should(Succeed())
 	})
 
+	DescribeTable("recovers provider-backed disk records after a lost Create response", func(ctx context.Context, provider string) {
+		tierID := createCatalogItemStorageTierFixtureForProvider(ctx, provider)
+		storageTiers := privatev1.NewStorageTiersClient(tool.InternalView().AdminConn())
+		tier, err := storageTiers.Get(ctx, privatev1.StorageTiersGetRequest_builder{Id: tierID}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		tierName := tier.GetObject().GetMetadata().GetName()
+		diskSpec := privatev1.ComputeInstanceSpec_builder{
+			BootDisk: privatev1.ComputeInstanceDisk_builder{
+				SizeGib:     new(int32(30)),
+				StorageTier: privatev1.StorageTierReference_builder{Id: tierID}.Build(),
+			}.Build(),
+			AdditionalDisks: privatev1.ComputeInstanceDiskList_builder{Items: []*privatev1.ComputeInstanceDisk{
+				privatev1.ComputeInstanceDisk_builder{
+					SizeGib:     new(int32(12)),
+					StorageTier: privatev1.StorageTierReference_builder{Id: tierID}.Build(),
+				}.Build(),
+			}}.Build(),
+		}.Build()
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network, diskSpec)
+		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parent.GetSpec().GetBootDisk().GetStorageTier().GetName()).To(Equal(tierName))
+		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()).To(HaveLen(1))
+		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()[0].GetStorageTier().GetName()).To(Equal(tierName))
+
+		var committedBootID string
+		DeferCleanup(func(cleanupCtx context.Context) {
+			if committedBootID == "" {
+				return
+			}
+			current, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+			if status.Code(getErr) == codes.NotFound {
+				return
+			}
+			Expect(getErr).NotTo(HaveOccurred())
+			if diskRegistrationState(current, "boot") == privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN {
+				_, recoverErr := computeinstance.ReconcileDiskRegistrations(cleanupCtx,
+					computeInstances, volumes, instance.GetId())
+				Expect(recoverErr).NotTo(HaveOccurred())
+			}
+		})
+		faultingVolumes := &diskRegistrationLostResponseVolumesClient{
+			VolumesClient: volumes,
+			hideFirstList: true,
+			afterCreate: func(response *privatev1.VolumesCreateResponse) {
+				committedBootID = response.GetObject().GetId()
+			},
+		}
+		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
+		Expect(err).To(HaveOccurred())
+		Expect(complete).To(BeFalse())
+		Expect(committedBootID).NotTo(BeEmpty())
+		Expect(faultingVolumes.createCalls).To(Equal(1))
+		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
+
+		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(complete).To(BeTrue())
+		resolved, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resolved.GetStatus().GetVolumes()).To(HaveLen(2))
+		ids := make(map[string]string, 2)
+		for _, saved := range resolved.GetStatus().GetVolumes() {
+			ids[saved.GetDiskKey()] = saved.GetVolumeId()
+		}
+		Expect(ids).To(HaveKeyWithValue("boot", committedBootID))
+		Expect(ids).To(HaveKey("disk-1"))
+		Expect(ids["disk-1"]).NotTo(BeEmpty())
+		Expect(ids["disk-1"]).NotTo(Equal(committedBootID))
+		for _, id := range ids {
+			observed, getErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+			Expect(getErr).NotTo(HaveOccurred())
+			Expect(observed.GetObject().GetSpec().GetStorageTier()).To(Equal(tierName))
+			Expect(observed.GetObject().GetStatus().GetProvider()).To(Equal(provider))
+		}
+		assertNoDiskRegistrationComputeInstanceCR(ctx, instance.GetId())
+
+		publicInstances := publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
+		_, err = publicInstances.Delete(ctx, publicv1.ComputeInstancesDeleteRequest_builder{Id: instance.GetId()}.Build())
+		Expect(err).NotTo(HaveOccurred())
+		for _, id := range ids {
+			Eventually(func(g Gomega) {
+				_, getErr := volumes.Get(ctx, privatev1.VolumesGetRequest_builder{Id: id}.Build())
+				g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+			}, 2*time.Minute, time.Second).Should(Succeed())
+		}
+		Eventually(func(g Gomega) {
+			_, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+		}, 2*time.Minute, time.Second).Should(Succeed())
+	},
+		Entry("LVMS", "lvms"),
+		Entry("VAST API record", "vast"),
+	)
+
 	DescribeTable("registers and removes disk records through a supported storage tier", func(ctx context.Context, provider string) {
 		tierID := createCatalogItemStorageTierFixtureForProvider(ctx, provider)
 		storageTiers := privatev1.NewStorageTiersClient(tool.InternalView().AdminConn())
@@ -553,56 +652,31 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 				}.Build(),
 			}}.Build(),
 		}.Build()
-		var committedBootID string
-		DeferCleanup(func(cleanupCtx context.Context) {
-			if committedBootID == "" {
-				return
-			}
-			_, cleanupErr := volumes.Delete(cleanupCtx,
-				privatev1.VolumesDeleteRequest_builder{Id: committedBootID}.Build())
-			Expect(cleanupErr == nil || status.Code(cleanupErr) == codes.NotFound).To(BeTrue())
-		})
 		instance := createDiskRegistrationAPIContractInstance(ctx, spec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
-		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(parent.GetSpec().GetBootDisk().GetStorageTier().GetName()).To(Equal(tierName))
-		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()).To(HaveLen(1))
-		Expect(parent.GetSpec().GetAdditionalDisks().GetItems()[0].GetStorageTier().GetName()).To(Equal(tierName))
-
-		faultingVolumes := &diskRegistrationLostResponseVolumesClient{
-			VolumesClient: volumes,
-			hideFirstList: true,
-			afterCreate: func(response *privatev1.VolumesCreateResponse) {
-				committedBootID = response.GetObject().GetId()
-			},
-		}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
-		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
-		Expect(committedBootID).NotTo(BeEmpty())
-		Expect(faultingVolumes.createCalls).To(Equal(1))
-		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(diskRegistrationState(uncertain, "boot")).To(Equal(
-			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
-		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
-
-		By("recovering the committed boot record and creating the additional record")
-		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
-		resolved, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(resolved.GetStatus().GetVolumes()).To(HaveLen(2))
-		ids := make(map[string]string, 2)
-		for _, saved := range resolved.GetStatus().GetVolumes() {
-			ids[saved.GetDiskKey()] = saved.GetVolumeId()
-		}
-		Expect(ids).To(HaveKeyWithValue("boot", committedBootID))
-		Expect(ids).To(HaveKey("disk-1"))
-		Expect(ids["disk-1"]).NotTo(BeEmpty())
-		Expect(ids["disk-1"]).NotTo(Equal(committedBootID))
+		var parent *privatev1.ComputeInstance
+		var ids map[string]string
+		Eventually(func(g Gomega) {
+			current, getErr := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(current.GetSpec().GetBootDisk().GetStorageTier().GetName()).To(Equal(tierName))
+			g.Expect(current.GetSpec().GetAdditionalDisks().GetItems()).To(HaveLen(1))
+			g.Expect(current.GetSpec().GetAdditionalDisks().GetItems()[0].GetStorageTier().GetName()).To(Equal(tierName))
+			g.Expect(current.GetStatus().GetVolumes()).To(HaveLen(2))
+			g.Expect(diskRegistrationState(current, "boot")).To(Equal(
+				privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+			g.Expect(diskRegistrationState(current, "disk-1")).To(Equal(
+				privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+			currentIDs := make(map[string]string, 2)
+			for _, saved := range current.GetStatus().GetVolumes() {
+				currentIDs[saved.GetDiskKey()] = saved.GetVolumeId()
+			}
+			g.Expect(currentIDs).To(HaveKey("boot"))
+			g.Expect(currentIDs).To(HaveKey("disk-1"))
+			g.Expect(currentIDs["boot"]).NotTo(BeEmpty())
+			g.Expect(currentIDs["disk-1"]).NotTo(BeEmpty())
+			g.Expect(currentIDs["disk-1"]).NotTo(Equal(currentIDs["boot"]))
+			parent, ids = current, currentIDs
+		}, time.Minute, time.Second).Should(Succeed())
 
 		for key, size := range map[string]int64{"boot": 30, "disk-1": 12} {
 			id := ids[key]
@@ -694,6 +768,7 @@ func createIsolatedDiskRegistrationInstance(
 	ctx context.Context,
 	templateID string,
 	network catalogItemNetworkFixture,
+	diskSpec ...*privatev1.ComputeInstanceSpec,
 ) *privatev1.ComputeInstance {
 	GinkgoHelper()
 	attachment := privatev1.ComputeNetworkAttachment_builder{
@@ -704,6 +779,14 @@ func createIsolatedDiskRegistrationInstance(
 			privatev1.SecurityGroupLocalReference_builder{Id: network.securityGroupID}.Build(),
 		})
 	}
+	spec := privatev1.ComputeInstanceSpec_builder{
+		Template:           privatev1.ComputeInstanceTemplateReference_builder{Id: templateID}.Build(),
+		NetworkAttachments: []*privatev1.ComputeNetworkAttachment{attachment},
+	}.Build()
+	if len(diskSpec) > 0 {
+		spec.SetBootDisk(diskSpec[0].GetBootDisk())
+		spec.SetAdditionalDisks(diskSpec[0].GetAdditionalDisks())
+	}
 	client := privatev1.NewComputeInstancesClient(tool.InternalView().AdminConn())
 	response, err := client.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
 		Object: privatev1.ComputeInstance_builder{
@@ -712,10 +795,7 @@ func createIsolatedDiskRegistrationInstance(
 				Tenant:     usersGroup,
 				Finalizers: []string{finalizers.Controller},
 			}.Build(),
-			Spec: privatev1.ComputeInstanceSpec_builder{
-				Template:           privatev1.ComputeInstanceTemplateReference_builder{Id: templateID}.Build(),
-				NetworkAttachments: []*privatev1.ComputeNetworkAttachment{attachment},
-			}.Build(),
+			Spec:   spec,
 			Status: privatev1.ComputeInstanceStatus_builder{Hub: diskRegistrationIsolationHubID}.Build(),
 		}.Build(),
 	}.Build())
