@@ -196,9 +196,69 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		existing, err := volumes.Create(ctx, diskRegistrationVolumeRequest(parent, name, storageTierName, 31))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(cleanupCtx context.Context) {
+			seedID := existing.GetObject().GetId()
 			_, cleanupErr := volumes.Delete(cleanupCtx,
-				privatev1.VolumesDeleteRequest_builder{Id: existing.GetObject().GetId()}.Build())
+				privatev1.VolumesDeleteRequest_builder{Id: seedID}.Build())
 			Expect(cleanupErr == nil || status.Code(cleanupErr) == codes.NotFound).To(BeTrue())
+			Eventually(func(g Gomega) {
+				_, getErr := volumes.Get(cleanupCtx, privatev1.VolumesGetRequest_builder{Id: seedID}.Build())
+				g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+			}, 2*time.Minute, time.Second).Should(Succeed())
+
+			// The test reconciler has returned. Verify its conflicting Create left
+			// no saved ID or other same-name record before settling this fixture.
+			remaining, listErr := volumes.List(cleanupCtx,
+				privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
+			Expect(listErr).NotTo(HaveOccurred())
+			Expect(remaining.GetTotal()).To(BeZero())
+			current, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+			if status.Code(getErr) == codes.NotFound {
+				return
+			}
+			Expect(getErr).NotTo(HaveOccurred())
+			Expect(current.GetStatus().GetHub()).To(Equal(diskRegistrationIsolationHubID))
+			unknownBoot := diskRegistrationState(current, "boot") ==
+				privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN
+			if unknownBoot {
+				Expect(current.GetStatus().GetVolumes()).To(BeEmpty())
+				Expect(current.GetStatus().GetVolumeRegistration()).To(HaveLen(1))
+				assertNoDiskRegistrationComputeInstanceCR(cleanupCtx, instance.GetId())
+			}
+
+			publicInstances := publicv1.NewComputeInstancesClient(tool.ExternalView().UserConn())
+			_, deleteErr := publicInstances.Delete(cleanupCtx,
+				publicv1.ComputeInstancesDeleteRequest_builder{Id: instance.GetId()}.Build())
+			Expect(deleteErr == nil || status.Code(deleteErr) == codes.NotFound).To(BeTrue())
+			if !unknownBoot {
+				return
+			}
+
+			Eventually(func(g Gomega) {
+				deleting, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(deleting.GetMetadata().HasDeletionTimestamp()).To(BeTrue())
+				g.Expect(deleting.GetStatus().GetHub()).To(Equal(diskRegistrationIsolationHubID))
+				g.Expect(deleting.GetStatus().GetVolumes()).To(BeEmpty())
+				registrations := deleting.GetStatus().GetVolumeRegistration()
+				g.Expect(registrations).To(HaveLen(1))
+				g.Expect(registrations[0].GetDiskKey()).To(Equal("boot"))
+				g.Expect(registrations[0].GetState()).To(Equal(
+					privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+				registrations[0].SetState(privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE)
+				_, updateErr := computeInstances.Update(cleanupCtx, privatev1.ComputeInstancesUpdateRequest_builder{
+					Object:     deleting,
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"status.volume_registration"}},
+					Lock:       true,
+				}.Build())
+				g.Expect(updateErr).NotTo(HaveOccurred())
+			}, time.Minute, time.Second).Should(Succeed())
+			_, signalErr := computeInstances.Signal(cleanupCtx,
+				privatev1.ComputeInstancesSignalRequest_builder{Id: instance.GetId()}.Build())
+			Expect(signalErr == nil || status.Code(signalErr) == codes.NotFound).To(BeTrue())
+			Eventually(func(g Gomega) {
+				_, getErr := getDiskRegistrationComputeInstance(cleanupCtx, computeInstances, instance.GetId())
+				g.Expect(status.Code(getErr)).To(Equal(codes.NotFound))
+			}, 2*time.Minute, time.Second).Should(Succeed())
 		})
 
 		countedVolumes := &diskRegistrationCountingVolumesClient{VolumesClient: volumes}
