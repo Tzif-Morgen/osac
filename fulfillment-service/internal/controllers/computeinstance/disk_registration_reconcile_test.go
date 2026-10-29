@@ -398,6 +398,92 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED))
 	})
 
+	It("releases a canceled parent when its claimed Create was never dispatched", func() {
+		computeClient, volumesClient := registrationTestClients()
+		computeClient.failBeforeUpdateCalls = map[int]error{
+			3: status.Error(codes.Aborted, "another status update won the lock"),
+		}
+		computeClient.afterUpdate = func(call int) {
+			if call == 2 { // The attempted marker committed; Create has not started.
+				Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+					privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+				computeClient.object.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
+				computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
+			}
+		}
+
+		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(complete).To(BeFalse())
+		Expect(volumesClient.createRequests).To(BeEmpty())
+		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE))
+		Expect(computeClient.updateRequests).To(HaveLen(4))
+		settlement := computeClient.updateRequests[3]
+		Expect(settlement.GetLock()).To(BeTrue())
+		Expect(settlement.GetUpdateMask().GetPaths()).To(ConsistOf("status.volume_registration"))
+
+		deleting, _, cleanupVolumes := newVolumeCleanupTask(nil,
+			cloneDiskRegistrations(computeClient.object.GetStatus().GetVolumeRegistration()))
+		Expect(deleting.delete(context.Background())).To(Succeed())
+		Expect(hasFinalizer(deleting.computeInstance)).To(BeFalse())
+		Expect(cleanupVolumes.createCalls).To(BeZero())
+	})
+
+	It("preserves a newer Volume ID when cancellation settlement loses the lock", func() {
+		computeClient, volumesClient := registrationTestClients()
+		computeClient.afterUpdate = func(call int) {
+			if call == 2 {
+				computeClient.object.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
+				computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
+			}
+		}
+		computeClient.beforeUpdate = func(call int) {
+			if call == 3 {
+				computeClient.object.GetStatus().SetVolumes([]*privatev1.ComputeInstanceVolume{
+					privatev1.ComputeInstanceVolume_builder{DiskKey: "boot", VolumeId: "volume-newer"}.Build(),
+				})
+				computeClient.object.GetStatus().GetVolumeRegistration()[0].SetState(
+					privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED)
+				computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
+			}
+		}
+
+		_, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(volumesClient.createRequests).To(BeEmpty())
+		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-newer"))
+		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		Expect(computeClient.updateRequests[2].GetLock()).To(BeTrue())
+	})
+
+	It("keeps UNKNOWN after cancellation when Volume Create may have committed", func() {
+		computeClient, volumesClient := registrationTestClients()
+		volumesClient.create = func(context.Context, *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			return nil, status.Error(codes.Unavailable, "Create response lost")
+		}
+
+		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		Expect(err).To(HaveOccurred())
+		Expect(complete).To(BeFalse())
+		Expect(volumesClient.createRequests).To(HaveLen(1))
+		computeClient.object.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
+		computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
+
+		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(complete).To(BeFalse())
+		Expect(volumesClient.createRequests).To(HaveLen(1))
+		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+
+		deleting, _, _ := newVolumeCleanupTask(nil,
+			cloneDiskRegistrations(computeClient.object.GetStatus().GetVolumeRegistration()))
+		Expect(deleting.delete(context.Background())).To(HaveOccurred())
+		Expect(hasFinalizer(deleting.computeInstance)).To(BeTrue())
+	})
+
 	It("does no work when the parent finalizer is absent", func() {
 		computeClient, volumesClient := registrationTestClients()
 		computeClient.object.GetMetadata().SetFinalizers(nil)
@@ -470,6 +556,8 @@ type registrationComputeInstancesClient struct {
 	updateRequests        []*privatev1.ComputeInstancesUpdateRequest
 	failBeforeUpdateCalls map[int]error
 	failAfterUpdateCalls  map[int]error
+	beforeUpdate          func(int)
+	afterUpdate           func(int)
 }
 
 func (c *registrationComputeInstancesClient) Get(
@@ -495,6 +583,9 @@ func (c *registrationComputeInstancesClient) Update(
 ) (*privatev1.ComputeInstancesUpdateResponse, error) {
 	c.updateRequests = append(c.updateRequests, proto.Clone(request).(*privatev1.ComputeInstancesUpdateRequest))
 	call := len(c.updateRequests)
+	if c.beforeUpdate != nil {
+		c.beforeUpdate(call)
+	}
 	if err := c.failBeforeUpdateCalls[call]; err != nil {
 		return nil, err
 	}
@@ -519,9 +610,13 @@ func (c *registrationComputeInstancesClient) Update(
 	if err := c.failAfterUpdateCalls[call]; err != nil {
 		return nil, err
 	}
-	return privatev1.ComputeInstancesUpdateResponse_builder{
+	response := privatev1.ComputeInstancesUpdateResponse_builder{
 		Object: proto.Clone(c.object).(*privatev1.ComputeInstance),
-	}.Build(), nil
+	}.Build()
+	if c.afterUpdate != nil {
+		c.afterUpdate(call)
+	}
+	return response, nil
 }
 
 type registrationVolumesClient struct {

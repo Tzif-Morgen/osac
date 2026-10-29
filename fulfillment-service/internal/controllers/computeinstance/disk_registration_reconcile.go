@@ -227,6 +227,11 @@ func reloadClaimedDiskRegistration(
 	if !hasDiskRegistrationFinalizer(current) {
 		return nil, preparedDiskRegistration{}, false, nil
 	}
+	if current.GetMetadata().HasDeletionTimestamp() {
+		// Only this claim's owner knows Volume Create has not been called.
+		return nil, preparedDiskRegistration{}, false,
+			settleUndispatchedDiskRegistration(ctx, client, current, candidate.diskKey)
+	}
 	prepared, err := prepareDiskRegistrations(current)
 	if err != nil {
 		return nil, preparedDiskRegistration{}, false, err
@@ -250,11 +255,40 @@ func reloadClaimedDiskRegistration(
 	}
 	if _, exists := volumes[candidate.diskKey]; exists ||
 		registrations[candidate.diskKey] == nil ||
-		registrations[candidate.diskKey].GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN ||
-		current.GetMetadata().HasDeletionTimestamp() {
+		registrations[candidate.diskKey].GetState() != privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN {
 		return nil, preparedDiskRegistration{}, false, nil
 	}
 	return current, latest, true, nil
+}
+
+func settleUndispatchedDiskRegistration(
+	ctx context.Context,
+	client privatev1.ComputeInstancesClient,
+	current *privatev1.ComputeInstance,
+	diskKey string,
+) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !hasDiskRegistrationFinalizer(current) {
+			return nil
+		}
+		if !current.GetMetadata().HasDeletionTimestamp() {
+			return fmt.Errorf("ComputeInstance '%s' deletion was cleared before settling disk '%s'",
+				current.GetId(), diskKey)
+		}
+		// The locked update protects a newer registration result or Volume ID.
+		conflict, err := persistDiskRegistrationState(ctx, client, current, diskKey,
+			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE)
+		if err != nil || !conflict {
+			return err
+		}
+		current, err = getComputeInstanceForDiskRegistration(ctx, client, current.GetId())
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func handleDiskRegistrationCreateError(
