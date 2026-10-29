@@ -1363,7 +1363,7 @@ var _ = Describe("delete", func() {
 		}, nil)
 		t.r.hubCache = hubCache
 
-		Expect(t.delete(ctx)).To(Succeed())
+		Expect(t.delete(ctx)).To(MatchError("kubernetes compute instance deletion is still in progress"))
 		Expect(deleteCalled).To(BeTrue())
 		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
 		Expect(volumesClient.getRequests).To(BeEmpty())
@@ -1739,7 +1739,8 @@ var _ = Describe("delete", func() {
 		t := newTaskForDelete(ciID, hubID, hubCache)
 
 		err := t.delete(ctx)
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).To(MatchError("kubernetes compute instance deletion is still in progress"))
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
 		Expect(deleteCalled).To(BeTrue())
 		// Finalizer should NOT be removed — K8s object still exists
 		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())
@@ -1776,7 +1777,8 @@ var _ = Describe("delete", func() {
 		t := newTaskForDelete(ciID, hubID, hubCache)
 
 		err := t.delete(ctx)
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).To(MatchError("kubernetes compute instance deletion is still in progress"))
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
 		Expect(deleteCalled).To(BeFalse())
 		// Finalizer should NOT be removed — K8s object still being deleted
 		Expect(hasFinalizer(t.computeInstance)).To(BeTrue())

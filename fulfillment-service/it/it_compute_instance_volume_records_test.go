@@ -44,6 +44,7 @@ import (
 const (
 	diskRegistrationVolumeHoldFinalizer = "osac-test.osac.io/hold-volume-record-cleanup"
 	diskRegistrationPlaceholderNode     = "osac-volume-registration-pending"
+	diskRegistrationIsolationHubID      = "00000000-0000-4000-8000-000000000000"
 )
 
 var _ = Describe("ComputeInstance Volume registration API contract", func() {
@@ -84,11 +85,9 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	})
 
 	It("recovers the original record after a committed Create response is lost", func(ctx context.Context) {
-		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network)
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(parent.GetMetadata().GetCreator()).NotTo(Equal("system"))
 
 		volumeName := "ci-" + instance.GetId() + "-boot"
 		filter := diskRegistrationAPIFilter(volumeName, parent.GetMetadata().GetTenant(), parent.GetMetadata().GetProject())
@@ -157,8 +156,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	})
 
 	It("recovers a matching same-name record through real API uniqueness", func(ctx context.Context) {
-		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network)
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		name := "ci-" + instance.GetId() + "-boot"
@@ -189,8 +187,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	})
 
 	It("does not adopt a conflicting same-name record from the real API", func(ctx context.Context) {
-		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network)
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		name := "ci-" + instance.GetId() + "-boot"
@@ -223,8 +220,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	})
 
 	It("allows only one concurrent reconciler to dispatch a same-name Create", func(ctx context.Context) {
-		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network)
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		name := "ci-" + instance.GetId() + "-boot"
@@ -305,8 +301,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 	})
 
 	It("keeps a committed attempted marker blocked after a pre-call interruption", func(ctx context.Context) {
-		instance := createDiskRegistrationAPIContractInstance(ctx, computeInstanceSpec)
-		waitForDiskRegistrationFinalizer(ctx, computeInstances, instance.GetId())
+		instance := createIsolatedDiskRegistrationInstance(ctx, templateID, network)
 		parent, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		volumeName := "ci-" + instance.GetId() + "-boot"
@@ -629,6 +624,56 @@ func createDiskRegistrationAPIContractInstance(ctx context.Context, spec *public
 	GinkgoHelper()
 	instance, err := createComputeInstanceFixture(ctx, tool.ExternalView().UserConn(), spec)
 	Expect(err).NotTo(HaveOccurred())
+	return instance
+}
+
+// The deployed controller sees the noncanonical Hub and stops before disk
+// registration. These cases can then drive the production registration helper
+// through real private APIs without a competing reconciler.
+func createIsolatedDiskRegistrationInstance(
+	ctx context.Context,
+	templateID string,
+	network catalogItemNetworkFixture,
+) *privatev1.ComputeInstance {
+	GinkgoHelper()
+	attachment := privatev1.ComputeNetworkAttachment_builder{
+		Subnet: privatev1.SubnetLocalReference_builder{Id: network.subnetID}.Build(),
+	}.Build()
+	if network.securityGroupID != "" {
+		attachment.SetSecurityGroups([]*privatev1.SecurityGroupLocalReference{
+			privatev1.SecurityGroupLocalReference_builder{Id: network.securityGroupID}.Build(),
+		})
+	}
+	client := privatev1.NewComputeInstancesClient(tool.InternalView().AdminConn())
+	response, err := client.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+		Object: privatev1.ComputeInstance_builder{
+			Metadata: privatev1.Metadata_builder{
+				Name:       catalogItemFixtureName(),
+				Tenant:     usersGroup,
+				Finalizers: []string{finalizers.Controller},
+			}.Build(),
+			Spec: privatev1.ComputeInstanceSpec_builder{
+				Template:           privatev1.ComputeInstanceTemplateReference_builder{Id: templateID}.Build(),
+				NetworkAttachments: []*privatev1.ComputeNetworkAttachment{attachment},
+			}.Build(),
+			Status: privatev1.ComputeInstanceStatus_builder{Hub: diskRegistrationIsolationHubID}.Build(),
+		}.Build(),
+	}.Build())
+	Expect(err).NotTo(HaveOccurred())
+	instance := response.GetObject()
+	Expect(instance.GetStatus().GetHub()).To(Equal(diskRegistrationIsolationHubID))
+	Expect(instance.GetMetadata().GetFinalizers()).To(ContainElement(finalizers.Controller))
+	deferComputeInstanceDeletion(instance.GetId(), tool.ExternalView().AdminConn())
+	Eventually(func(g Gomega) {
+		current, getErr := client.Get(ctx,
+			privatev1.ComputeInstancesGetRequest_builder{Id: instance.GetId()}.Build())
+		g.Expect(getErr).NotTo(HaveOccurred())
+		g.Expect(current.GetObject().GetStatus().GetHub()).To(Equal(diskRegistrationIsolationHubID))
+		g.Expect(current.GetObject().GetStatus().GetState()).To(Equal(
+			privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_FAILED))
+		g.Expect(current.GetObject().GetStatus().GetVolumes()).To(BeEmpty())
+		g.Expect(current.GetObject().GetStatus().GetVolumeRegistration()).To(BeEmpty())
+	}, time.Minute, time.Second).Should(Succeed())
 	return instance
 }
 

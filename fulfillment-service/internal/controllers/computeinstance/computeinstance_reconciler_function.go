@@ -562,7 +562,7 @@ func (t *task) delete(ctx context.Context) (err error) {
 	}
 
 	// Don't remove finalizer — K8s object still exists with finalizers being processed.
-	return
+	return controllers.RequeueAfterKubernetesDeletion("compute instance")
 }
 
 func (t *task) reconcileAutoExternalIPAttachment(ctx context.Context) error {
