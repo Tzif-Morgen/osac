@@ -49,11 +49,18 @@ func (t *task) releaseFinalizerAfterVolumeCleanup(ctx context.Context, release f
 		if t.r == nil || t.r.computeInstancesClient == nil || t.r.volumesClient == nil {
 			return t.retryVolumeCleanup(errors.New("disk registration recovery clients are not configured"))
 		}
-		if _, err = ReconcileDiskRegistrations(ctx, t.r.computeInstancesClient, t.r.volumesClient, instance.GetId()); err != nil {
+		if err = ReconcileDiskRegistrations(ctx, t.r.computeInstancesClient, t.r.volumesClient, instance.GetId()); err != nil {
 			return t.retryVolumeCleanup(err)
 		}
 		instance, err = getComputeInstanceForDiskRegistration(ctx, t.r.computeInstancesClient, instance.GetId())
 		if err != nil {
+			return t.retryVolumeCleanup(err)
+		}
+		prepared, err := prepareDiskRegistrations(instance)
+		if err != nil {
+			return t.retryVolumeCleanup(err)
+		}
+		if _, err := diskRegistrationsComplete(instance, prepared); err != nil {
 			return t.retryVolumeCleanup(err)
 		}
 	}

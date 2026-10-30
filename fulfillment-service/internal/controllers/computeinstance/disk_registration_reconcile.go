@@ -33,63 +33,56 @@ import (
 )
 
 // ReconcileDiskRegistrations creates or recovers the Volume records described
-// by a persisted ComputeInstance. It never dispatches workload changes.
+// by a persisted ComputeInstance. It never dispatches workload changes. A nil
+// error means this pass encountered no error, not that registration is complete;
+// callers must read the resulting ComputeInstance to decide what happens next.
 func ReconcileDiskRegistrations(
 	ctx context.Context,
 	computeInstancesClient privatev1.ComputeInstancesClient,
 	volumesClient privatev1.VolumesClient,
 	computeInstanceID string,
-) (bool, error) {
+) error {
 	if computeInstancesClient == nil {
-		return false, fmt.Errorf("ComputeInstances client is not configured")
+		return fmt.Errorf("ComputeInstances client is not configured")
 	}
 	if volumesClient == nil {
-		return false, fmt.Errorf("volumes client is not configured")
+		return fmt.Errorf("volumes client is not configured")
 	}
 	if computeInstanceID == "" {
-		return false, fmt.Errorf("ComputeInstance ID is required for disk registration")
+		return fmt.Errorf("ComputeInstance ID is required for disk registration")
 	}
 
 	current, err := getComputeInstanceForDiskRegistration(ctx, computeInstancesClient, computeInstanceID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if !hasDiskRegistrationFinalizer(current) {
-		return false, nil
+		return nil
 	}
 	prepared, err := prepareDiskRegistrations(current)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	t := &task{r: &function{computeInstancesClient: computeInstancesClient}, computeInstance: current}
 	if !current.GetMetadata().HasDeletionTimestamp() {
 		_, conflict, persistErr := t.persistDiskRegistrationIntents(ctx, current, prepared)
 		if persistErr != nil {
-			return false, persistErr
+			return persistErr
 		}
 		if conflict {
-			return false, nil
+			return nil
 		}
 	}
 
 	for _, initialCandidate := range prepared {
 		if err := reconcileDiskRegistrationCandidate(ctx, computeInstancesClient, volumesClient,
 			computeInstanceID, initialCandidate.diskKey); err != nil {
-			return false, err
+			return err
 		}
 	}
 
-	current, err = getComputeInstanceForDiskRegistration(ctx, computeInstancesClient, computeInstanceID)
-	if err != nil {
-		return false, err
-	}
-	prepared, err = prepareDiskRegistrations(current)
-	if err != nil {
-		return false, err
-	}
-	complete, err := diskRegistrationsComplete(current, prepared)
-	return complete, err
+	return nil
 }
 
 func reconcileDiskRegistrationCandidate(

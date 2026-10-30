@@ -406,7 +406,7 @@ func (t *task) reconcileDiskRegistrationForWorkload(ctx context.Context, workloa
 	if !reconcileRegistration {
 		return true, nil
 	}
-	_, registrationErr := ReconcileDiskRegistrations(
+	registrationErr := ReconcileDiskRegistrations(
 		ctx, t.r.computeInstancesClient, t.r.volumesClient, t.computeInstance.GetId())
 	latest, err := getComputeInstanceForDiskRegistration(ctx, t.r.computeInstancesClient, t.computeInstance.GetId())
 	if err != nil {

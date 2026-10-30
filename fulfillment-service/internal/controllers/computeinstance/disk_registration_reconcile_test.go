@@ -53,9 +53,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return privatev1.VolumesCreateResponse_builder{Object: volume}.Build(), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(createCalls).To(Equal(1))
 		Expect(computeClient.object.GetStatus().GetVolumes()).To(HaveLen(1))
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetDiskKey()).To(Equal("boot"))
@@ -103,9 +103,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}.Build(), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(volumesClient.createRequests).To(HaveLen(3))
 		Expect(computeClient.object.GetStatus().GetVolumes()).To(HaveLen(3))
 		Expect(registrationStates(computeClient.object)).To(Equal(map[string]privatev1.ComputeInstanceVolumeRegistration_State{
@@ -133,15 +133,15 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return registrationTestListResponse([]*privatev1.Volume{committed}, 1), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 
-		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(createCalls).To(Equal(1))
 		Expect(listCalls).To(Equal(2))
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-original"))
@@ -159,8 +159,8 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		}
 
 		for attempt := range 2 {
-			complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
-			Expect(complete).To(BeFalse())
+			err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+			Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 			if attempt == 0 {
 				Expect(err).To(HaveOccurred())
 			} else {
@@ -185,15 +185,15 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}.Build(), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE))
 
-		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(createCalls).To(Equal(2))
 	})
 
@@ -214,9 +214,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}, 1), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-existing"))
 	})
 
@@ -231,8 +231,8 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			})
 			volumesClient.list = list(volumesClient)
 
-			complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
-			Expect(complete).To(BeFalse())
+			err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+			Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 			if expectError {
 				Expect(err).To(HaveOccurred())
 			} else {
@@ -349,9 +349,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return registrationTestListResponse(nil, 0), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 	})
 
 	It("can recover an uncertain disk during deletion but never creates a fresh disk", func() {
@@ -371,9 +371,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}, 1), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(volumesClient.createRequests).To(BeEmpty())
 		Expect(volumesClient.listRequests).To(HaveLen(1))
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-recovered"))
@@ -389,9 +389,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}.Build(),
 		})
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(volumesClient.createRequests).To(BeEmpty())
 		Expect(volumesClient.listRequests).To(BeEmpty())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
@@ -412,9 +412,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(volumesClient.createRequests).To(BeEmpty())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_NON_COMMITTED_FAILURE))
@@ -449,7 +449,7 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			}
 		}
 
-		_, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(volumesClient.createRequests).To(BeEmpty())
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-newer"))
@@ -464,16 +464,16 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return nil, status.Error(codes.Unavailable, "Create response lost")
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(volumesClient.createRequests).To(HaveLen(1))
 		computeClient.object.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
 		computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
 
-		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(volumesClient.createRequests).To(HaveLen(1))
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
@@ -488,9 +488,9 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 		computeClient, volumesClient := registrationTestClients()
 		computeClient.object.GetMetadata().SetFinalizers(nil)
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(computeClient.updateRequests).To(BeEmpty())
 		Expect(volumesClient.createRequests).To(BeEmpty())
 		Expect(volumesClient.listRequests).To(BeEmpty())
@@ -512,15 +512,15 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return registrationTestListResponse([]*privatev1.Volume{committed}, 1), nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeFalse())
 		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 
-		complete, err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err = ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(createCalls).To(Equal(1))
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-committed"))
 	})
@@ -541,18 +541,28 @@ var _ = Describe("ReconcileDiskRegistrations", func() {
 			return nil, nil
 		}
 
-		complete, err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
+		err := ReconcileDiskRegistrations(context.Background(), computeClient, volumesClient, diskRegistrationTestID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
+		Expect(diskRegistrationCompleteForTest(computeClient.object)).To(BeTrue())
 		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-original"))
 		Expect(volumesClient.createRequests).To(BeEmpty())
 	})
 })
 
+func diskRegistrationCompleteForTest(instance *privatev1.ComputeInstance) bool {
+	prepared, err := prepareDiskRegistrations(instance)
+	Expect(err).NotTo(HaveOccurred())
+	complete, err := diskRegistrationsComplete(instance, prepared)
+	Expect(err).NotTo(HaveOccurred())
+	return complete
+}
+
 type registrationComputeInstancesClient struct {
 	privatev1.ComputeInstancesClient
 	object                *privatev1.ComputeInstance
 	getErr                error
+	getCalls              int
+	beforeGet             func(int)
 	updateRequests        []*privatev1.ComputeInstancesUpdateRequest
 	failBeforeUpdateCalls map[int]error
 	failAfterUpdateCalls  map[int]error
@@ -565,6 +575,10 @@ func (c *registrationComputeInstancesClient) Get(
 	request *privatev1.ComputeInstancesGetRequest,
 	_ ...grpc.CallOption,
 ) (*privatev1.ComputeInstancesGetResponse, error) {
+	c.getCalls++
+	if c.beforeGet != nil {
+		c.beforeGet(c.getCalls)
+	}
 	if c.getErr != nil {
 		return nil, c.getErr
 	}

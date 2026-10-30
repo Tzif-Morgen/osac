@@ -830,6 +830,100 @@ var _ = Describe("disk registration handoff from the reconciler", func() {
 		}, computeClient, hubClient
 	}
 
+	newWorkloadRegistrationTask := func() (*task, *registrationComputeInstancesClient, *registrationVolumesClient) {
+		instance := newInstance()
+		instance.GetSpec().SetAdditionalDisks(nil)
+		computeClient := &registrationComputeInstancesClient{object: proto.Clone(instance).(*privatev1.ComputeInstance)}
+		volumesClient := &registrationVolumesClient{}
+		volumesClient.create = func(_ context.Context, request *privatev1.VolumesCreateRequest) (*privatev1.VolumesCreateResponse, error) {
+			return privatev1.VolumesCreateResponse_builder{
+				Object: registrationTestVolume(request, "volume-boot", "system"),
+			}.Build(), nil
+		}
+		return &task{
+			r:               &function{computeInstancesClient: computeClient, volumesClient: volumesClient},
+			computeInstance: instance,
+		}, computeClient, volumesClient
+	}
+
+	It("reads the parent once after the last resolution write", func() {
+		registrationTask, computeClient, _ := newWorkloadRegistrationTask()
+		readsAtResolution := -1
+		computeClient.afterUpdate = func(call int) {
+			if call == 3 {
+				readsAtResolution = computeClient.getCalls
+			}
+		}
+
+		ready, err := registrationTask.reconcileDiskRegistrationForWorkload(context.Background(), true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeTrue())
+		Expect(readsAtResolution).To(BeNumerically(">", 0))
+		Expect(computeClient.getCalls - readsAtResolution).To(Equal(1))
+		Expect(registrationTask.registeredVolumes).To(HaveLen(1))
+		Expect(registrationTask.registeredVolumes[0].GetVolumeId()).To(Equal("volume-boot"))
+	})
+
+	It("reports a failed final read after persisting the Volume ID", func() {
+		registrationTask, computeClient, _ := newWorkloadRegistrationTask()
+		computeClient.afterUpdate = func(call int) {
+			if call == 3 {
+				computeClient.getErr = errors.New("final read unavailable")
+			}
+		}
+
+		ready, err := registrationTask.reconcileDiskRegistrationForWorkload(context.Background(), true)
+		Expect(ready).To(BeFalse())
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-boot"))
+		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		Expect(registrationTask.registeredVolumes).To(BeEmpty())
+		Expect(provisioned(registrationTask.computeInstance).GetReason()).To(Equal("VolumeRegistrationPending"))
+	})
+
+	DescribeTable("stops when the final read observes parent cancellation",
+		func(removeFinalizer bool) {
+			registrationTask, computeClient, _ := newWorkloadRegistrationTask()
+			computeClient.afterUpdate = func(call int) {
+				if call != 3 {
+					return
+				}
+				if removeFinalizer {
+					computeClient.object.GetMetadata().SetFinalizers(nil)
+				} else {
+					computeClient.object.GetMetadata().SetDeletionTimestamp(timestamppb.Now())
+				}
+			}
+
+			ready, err := registrationTask.reconcileDiskRegistrationForWorkload(context.Background(), true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ready).To(BeFalse())
+			Expect(computeClient.object.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal("volume-boot"))
+			Expect(registrationTask.registeredVolumes).To(BeEmpty())
+		},
+		Entry("finalizer removed", true),
+		Entry("deletion started", false),
+	)
+
+	It("keeps the workload pending when the resolution write loses its lock", func() {
+		registrationTask, computeClient, _ := newWorkloadRegistrationTask()
+		computeClient.beforeUpdate = func(call int) {
+			if call == 3 {
+				computeClient.object.GetMetadata().SetVersion(computeClient.object.GetMetadata().GetVersion() + 1)
+			}
+		}
+
+		ready, err := registrationTask.reconcileDiskRegistrationForWorkload(context.Background(), true)
+		Expect(ready).To(BeFalse())
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(computeClient.object.GetStatus().GetVolumes()).To(BeEmpty())
+		Expect(registrationStates(computeClient.object)["boot"]).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+		Expect(registrationTask.registeredVolumes).To(BeEmpty())
+		Expect(provisioned(registrationTask.computeInstance).GetReason()).To(Equal("VolumeRegistrationPending"))
+	})
+
 	It("persists every disk ID before creating the first managed ComputeInstance", func() {
 		ctrl := gomock.NewController(GinkgoT())
 		DeferCleanup(ctrl.Finish)
@@ -1647,6 +1741,30 @@ var _ = Describe("delete", func() {
 		Expect(volumesClient.createCalls).To(BeZero())
 		Expect(volumesClient.listRequests).To(HaveLen(1))
 		Expect(volumesClient.deleteRequests).To(HaveLen(1))
+	})
+
+	It("blocks cleanup when the post-recovery read contains an unknown disk key", func() {
+		deleting, computeClient, volumesClient := newVolumeCleanupTask(nil, []*privatev1.ComputeInstanceVolumeRegistration{
+			privatev1.ComputeInstanceVolumeRegistration_builder{
+				DiskKey: "boot",
+				State:   privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN,
+			}.Build(),
+		})
+		computeClient.beforeGet = func(call int) {
+			if call == 3 {
+				computeClient.object.GetStatus().GetVolumeRegistration()[0].SetDiskKey("other")
+				computeClient.object.GetStatus().GetVolumeRegistration()[0].SetState(
+					privatev1.ComputeInstanceVolumeRegistration_STATE_NEVER_ATTEMPTED)
+			}
+		}
+
+		err := deleting.releaseFinalizerAfterVolumeCleanup(context.Background(), deleting.removeFinalizer)
+		Expect(controllers.IsRequeueable(err)).To(BeTrue())
+		Expect(err).To(MatchError(ContainSubstring("unknown disk")))
+		Expect(computeClient.getCalls).To(Equal(3))
+		Expect(hasFinalizer(deleting.computeInstance)).To(BeTrue())
+		Expect(volumesClient.createCalls).To(BeZero())
+		Expect(volumesClient.deleteRequests).To(BeEmpty())
 	})
 
 	It("retains an uncertain registration when recovery finds no record", func() {

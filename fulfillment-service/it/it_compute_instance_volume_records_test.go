@@ -122,9 +122,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 					map[string]string{"osac.io/node": diskRegistrationPlaceholderNode}))
 			},
 		}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
 		Expect(committedID).NotTo(BeEmpty())
 		Expect(faultingVolumes.createCalls).To(Equal(1))
 		Expect(faultingVolumes.listCalls).To(Equal(1))
@@ -139,9 +138,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			Equal("VolumeRegistrationPending"))))
 
 		By("restarting from the persisted parent ID and recovering through the real private List API")
-		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
 		resolved, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(diskRegistrationState(resolved, "boot")).To(Equal(
@@ -171,9 +169,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		})
 
 		countedVolumes := &diskRegistrationCountingVolumesClient{VolumesClient: volumes}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
 		Expect(countedVolumes.createCalls).To(Equal(1))
 		Expect(countedVolumes.listCalls).To(Equal(1))
 
@@ -181,6 +178,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(persisted.GetStatus().GetVolumes()).To(HaveLen(1))
 		Expect(persisted.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(existing.GetObject().GetId()))
+		Expect(diskRegistrationState(persisted, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 		all, err := volumes.List(ctx, privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all.GetTotal()).To(Equal(int32(1)))
@@ -262,9 +261,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		})
 
 		countedVolumes := &diskRegistrationCountingVolumesClient{VolumesClient: volumes}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
 		Expect(countedVolumes.createCalls).To(Equal(1))
 		Expect(countedVolumes.listCalls).To(Equal(1))
 
@@ -328,29 +326,28 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			}
 		})
 
-		type result struct {
-			complete bool
-			err      error
-		}
-		firstResult := make(chan result, 1)
+		firstResult := make(chan error, 1)
 		go func() {
 			defer close(firstDone)
-			complete, reconcileErr := computeinstance.ReconcileDiskRegistrations(ctx,
+			reconcileErr := computeinstance.ReconcileDiskRegistrations(ctx,
 				computeInstances, barrier, instance.GetId())
-			firstResult <- result{complete: complete, err: reconcileErr}
+			firstResult <- reconcileErr
 		}()
 		Eventually(barrier.entered, time.Minute).Should(Receive())
 
-		secondComplete, secondErr := computeinstance.ReconcileDiskRegistrations(ctx,
+		secondErr := computeinstance.ReconcileDiskRegistrations(ctx,
 			computeInstances, barrier, instance.GetId())
 		Expect(secondErr).NotTo(HaveOccurred())
-		Expect(secondComplete).To(BeFalse())
+		pending, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diskRegistrationState(pending, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
+		Expect(pending.GetStatus().GetVolumes()).To(BeEmpty())
 		releaseCreate()
 
-		var first result
-		Eventually(firstResult, time.Minute).Should(Receive(&first))
-		Expect(first.err).NotTo(HaveOccurred())
-		Expect(first.complete).To(BeTrue())
+		var firstErr error
+		Eventually(firstResult, time.Minute).Should(Receive(&firstErr))
+		Expect(firstErr).NotTo(HaveOccurred())
 		Expect(barrier.createCalls.Load()).To(Equal(int32(1)))
 		all, err := volumes.List(ctx, privatev1.VolumesListRequest_builder{Filter: &filter}.Build())
 		Expect(err).NotTo(HaveOccurred())
@@ -358,6 +355,9 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 		persisted, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(persisted.GetStatus().GetVolumes()).To(HaveLen(1))
+		Expect(diskRegistrationState(persisted, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		Expect(persisted.GetStatus().GetVolumes()[0].GetVolumeId()).To(Equal(createdID))
 	})
 
 	It("keeps a committed attempted marker blocked after a pre-call interruption", func(ctx context.Context) {
@@ -383,17 +383,15 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			},
 		}
 		countedVolumes := &diskRegistrationCountingVolumesClient{VolumesClient: volumes}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, faultingComputeInstances, countedVolumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, faultingComputeInstances, countedVolumes, instance.GetId())
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
 		Expect(faultingComputeInstances.interrupted).To(BeTrue())
 		Expect(countedVolumes.createCalls).To(BeZero())
 
 		By("restarting from persisted state and allowing repeated complete empty List responses")
 		for range 3 {
-			complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
+			err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(complete).To(BeFalse())
 		}
 		Expect(countedVolumes.createCalls).To(BeZero())
 		Expect(countedVolumes.listCalls).To(Equal(3))
@@ -456,9 +454,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 
 		By("retaining the uncertain intent during repeated cancellation reconciles")
 		for range 3 {
-			complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
+			err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, countedVolumes, instance.GetId())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(complete).To(BeFalse())
 		}
 		Expect(countedVolumes.createCalls).To(BeZero())
 		Expect(countedVolumes.listCalls).To(Equal(6))
@@ -568,7 +565,7 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			}
 			Expect(getErr).NotTo(HaveOccurred())
 			if diskRegistrationState(current, "boot") == privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN {
-				_, recoverErr := computeinstance.ReconcileDiskRegistrations(cleanupCtx,
+				recoverErr := computeinstance.ReconcileDiskRegistrations(cleanupCtx,
 					computeInstances, volumes, instance.GetId())
 				Expect(recoverErr).NotTo(HaveOccurred())
 			}
@@ -580,9 +577,8 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 				committedBootID = response.GetObject().GetId()
 			},
 		}
-		complete, err := computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, faultingVolumes, instance.GetId())
 		Expect(err).To(HaveOccurred())
-		Expect(complete).To(BeFalse())
 		Expect(committedBootID).NotTo(BeEmpty())
 		Expect(faultingVolumes.createCalls).To(Equal(1))
 		uncertain, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
@@ -591,12 +587,15 @@ var _ = Describe("ComputeInstance Volume registration API contract", func() {
 			privatev1.ComputeInstanceVolumeRegistration_STATE_UNKNOWN))
 		Expect(uncertain.GetStatus().GetVolumes()).To(BeEmpty())
 
-		complete, err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
+		err = computeinstance.ReconcileDiskRegistrations(ctx, computeInstances, volumes, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(complete).To(BeTrue())
 		resolved, err := getDiskRegistrationComputeInstance(ctx, computeInstances, instance.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resolved.GetStatus().GetVolumes()).To(HaveLen(2))
+		Expect(diskRegistrationState(resolved, "boot")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
+		Expect(diskRegistrationState(resolved, "disk-1")).To(Equal(
+			privatev1.ComputeInstanceVolumeRegistration_STATE_RESOLVED))
 		ids := make(map[string]string, 2)
 		for _, saved := range resolved.GetStatus().GetVolumes() {
 			ids[saved.GetDiskKey()] = saved.GetVolumeId()

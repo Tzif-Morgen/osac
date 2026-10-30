@@ -276,9 +276,14 @@ installer command in the tier table remains the component-integration check.
   and before Volume Create. It proves zero Create calls, retries a version
   conflict while settling the undispatched claim, and releases the parent
   finalizer. A newer saved Volume ID wins the lock, while an ambiguous Create
-  remains UNKNOWN and retains the finalizer. These cases use controlled clients;
+  remains UNKNOWN and retains the finalizer. The workload boundary also checks
+  one parent read after the last resolution write, a failed final read after
+  persistence, cancellation seen in that read, and a conflicting resolution
+  write that leaves registration pending. These cases use controlled clients;
   the deployed timing of this cancellation window is not covered here.
 - **ComputeInstance Volume record cleanup ([OSAC-6611](https://redhat.atlassian.net/browse/OSAC-6611), [OSAC-6925](https://redhat.atlassian.net/browse/OSAC-6925), DEV):** `internal/controllers/computeinstance/computeinstance_reconciler_function_test.go` verifies that every parent-finalizer release path waits for saved Volume IDs to return Get NotFound, and that denied, inconclusive, mismatched, and partially removed records retain the parent state. `internal/servers/private_compute_instances_server_test.go` verifies that an intervening private status write survives a stale public update with the finalizer, full Volume IDs, and registration state intact, then reads them through a newly built server using the same database. The H5 cases in `it/it_compute_instance_volume_records_test.go` hold Volume records with fixture-owned finalizers after parent Delete, confirm the parent retains its saved IDs while records are deletion-pending, release each fixture finalizer, and wait for authorized Volume Get NotFound for every ID before parent removal. H2 uses controlled clients for failure and scope-mismatch responses; H1 uses real PostgreSQL and in-process servers; H5 uses real Fulfillment APIs/PostgreSQL with the operator disabled. The LVMS and VAST tier cases use provider-backed tier fixtures; the existing case uses the test backend. These checks make no AAP, CSI, provider, or physical-storage absence claim and do not restart the deployed service process. Run `ginkgo run --timeout 20m internal/controllers/computeinstance` and `ginkgo run --timeout 10m internal/servers` from `fulfillment-service/`; run H5 through `make -C osac-installer test PLATFORM=kind PROFILE=dev NS=osac SUITE=fulfillment` from the repository root. Deployed workload completion and cross-component ordering remain QE-owned under [OSAC-6040](https://redhat.atlassian.net/browse/OSAC-6040); the source testplan does not identify the QE suite path or command.
+  A controlled client also verifies that invalid registration state found by
+  the post-recovery parent read blocks finalizer release.
   The registration fault-injection cases create a private admin ComputeInstance
   with a controller finalizer and a deliberately noncanonical Hub, then wait
   for the deployed controller to reject that Hub before calling the production
